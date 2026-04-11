@@ -573,10 +573,6 @@ const GLOW_ANGLE_ZERO   = -0.35 // rad — matches MIN_PEAK_ANGLE; all visible s
 const GLOW_ANGLE_FULL   = 0.10  // rad — glow reaches full intensity above this angle
 const GLOW_PROMINENCE_SCALE = 150 // metres — ridge this far above its valley = full tProminence
 
-// Diagnostic counter — limits [GLOW-DIAG] output to the first 5 strands across all renders.
-// To re-trigger logs in DevTools: window._glowDiag = 0
-let _glowDiagCount = 0
-
 /**
  * Render a glow/light-catching effect behind silhouette strands.
  *
@@ -675,20 +671,6 @@ function renderSilhouetteGlow(
       { widthMul: 3,   alphaMul: 0.22, yOff: -baseOffset * 0.7 },  // sky halo (medium, brighter, up)
       { widthMul: 1.5, alphaMul: 0.45, yOff: -baseOffset * 0.3 },  // sky core (tight, brightest, slight up)
     ]
-
-    // [GLOW-DIAG] Log first 3 strands (far) + last 2 (near) — shows full distance range
-    const diagThis = _glowDiagCount < 3 || (si >= strands.length - 2 && _glowDiagCount < 5)
-    if (diagThis) {
-      console.log(
-        `[GLOW-DIAG] Strand ${si + 1}/${strands.length}:` +
-        ` segs=${segs.length}, avgDist=${(strand.avgDist / 1000).toFixed(1)}km,` +
-        ` distT=${distT.toFixed(3)}, baseWidth=${baseGlowWidth.toFixed(1)}px,` +
-        ` passes=[${passes.map(p => (baseGlowWidth * p.widthMul).toFixed(1) + 'px').join(', ')}],` +
-        ` offset=${baseOffset.toFixed(1)}px, tGlow=${tGlow.toFixed(3)},` +
-        ` glowAlpha=${glowAlpha.toFixed(3)}, color=rgb(${gr},${gg},${gb})`
-      )
-      _glowDiagCount++
-    }
 
     // Build runs (same azimuth-gap logic as strokes)
     const runs: Array<{ start: number; end: number }> = []
@@ -970,9 +952,6 @@ function buildContourStrands(
     const data = band.crossingData
     const interval = CONTOUR_INTERVALS_M[bi] || 152.4
 
-    // DEBUG: Log crossing data availability per band
-    console.log(`[CONTOUR-DEBUG] Band ${bi} (${bandAz}az, res=${bandRes}): crossingData=${data?.length ?? 0} floats, crossings≈${data ? Math.floor(data.length / 5) : 0}, offsets=${offsets?.length ?? 0}`)
-
     if (!data || data.length === 0) continue
 
     const maxAzGap = Math.ceil(bandRes * 2)  // Max 2° gap before expiring strand
@@ -1090,11 +1069,6 @@ function buildContourStrands(
         }
       }
     }
-
-    // DEBUG: Count strands for this band
-    const bandStrandCount = completed.filter(s => s.bandIdx === bi).length
-    const bandPointCount = completed.filter(s => s.bandIdx === bi).reduce((sum, s) => sum + s.points.length, 0)
-    console.log(`[CONTOUR-DEBUG] Band ${bi}: ${bandStrandCount} strands, ${bandPointCount} total points`)
   }
 
   return completed

@@ -18,10 +18,6 @@
  *   Tile URL: https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png
  *   Decoding: elevation = R*256 + G + B/256 − 32768
  *
- * The `TerrainProvider` swap point (Session 2+):
- *   Replace `loadElevationTile` in the import below with any source that
- *   returns `CachedTile` — no other code changes needed.
- *
  * Controls:
  *   Drag to pan · Scroll/pinch to zoom (4–16) · Tap to set explore location
  *
