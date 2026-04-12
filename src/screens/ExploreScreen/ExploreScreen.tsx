@@ -849,7 +849,7 @@ const PeakLabels3D: React.FC<{
             <>
               <div className={styles.peakLabelCard}>
                 <span className={styles.peakLabelName}>{peak.name}</span>
-                <span className={styles.peakLabelElev}>{formatElevation(bestElev, units)}</span>
+                <span className={styles.peakLabelElev}>{formatElevation(peak.elevation_m, units)}</span>
               </div>
               <div className={styles.peakLine3D} />
             </>

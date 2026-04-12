@@ -18,7 +18,7 @@ import type { Peak } from '../core/types'
 
 export const COLORADO_PEAKS: Peak[] = [
   // The Colorado Fourteeners (peaks above 14,000ft / 4,267m)
-  { id: 'mt-elbert',       name: 'Mt. Elbert',            lat: 39.1178, lng: -106.4452, elevation_m: 4399, isHighPoint: true },
+  { id: 'mt-elbert',       name: 'Mt. Elbert',            lat: 39.1178, lng: -106.4452, elevation_m: 4401, isHighPoint: true },
   { id: 'mt-massive',      name: 'Mt. Massive',           lat: 39.1875, lng: -106.4754, elevation_m: 4396 },
   { id: 'mt-harvard',      name: 'Mt. Harvard',           lat: 38.9239, lng: -106.3206, elevation_m: 4395 },
   { id: 'mt-lincoln',      name: 'Mt. Lincoln',           lat: 39.3514, lng: -106.1114, elevation_m: 4354 },
