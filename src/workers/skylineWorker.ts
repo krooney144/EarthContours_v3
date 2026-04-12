@@ -271,25 +271,41 @@ let lastCorrectedViewerElev = 0
 let lastCosViewerLat       = 1
 let lastSkylineComputed = false
 
+/** Decode a Terrarium PNG blob into a Float32Array of elevation values. */
+async function decodeTerrariumBlob(blob: Blob): Promise<Float32Array> {
+  const bitmap = await createImageBitmap(blob)
+  const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
+  const ctx    = canvas.getContext('2d')!
+  ctx.drawImage(bitmap, 0, 0, TILE_PX, TILE_PX)
+  const { data } = ctx.getImageData(0, 0, TILE_PX, TILE_PX)
+  const elevations = new Float32Array(TILE_PX * TILE_PX)
+  for (let i = 0; i < TILE_PX * TILE_PX; i++) {
+    elevations[i] = data[i * 4] * 256 + data[i * 4 + 1] + data[i * 4 + 2] / 256 - 32768
+  }
+  return elevations
+}
+
 async function fetchWorkerTile(z: number, x: number, y: number): Promise<Float32Array | null> {
   const key = `${z}/${x}/${y}`
   if (tileCacheW.has(key)) return tileCacheW.get(key)!
   if (pendingW.has(key))   return pendingW.get(key)!
 
   const p = (async (): Promise<Float32Array | null> => {
+    // Try local corrected tile first (Tier 3 equivalent for worker)
+    try {
+      const localResp = await fetch(`/tiles/elevation/${key}.png`)
+      if (localResp.ok) {
+        const elevations = await decodeTerrariumBlob(await localResp.blob())
+        tileCacheW.set(key, elevations)
+        return elevations
+      }
+    } catch { /* fall through to AWS */ }
+
+    // Fall back to AWS Terrarium (Tier 4)
     try {
       const resp = await fetch(`${AWS_BASE}/${key}.png`)
       if (!resp.ok) return null
-      const blob   = await resp.blob()
-      const bitmap = await createImageBitmap(blob)
-      const canvas = new OffscreenCanvas(TILE_PX, TILE_PX)
-      const ctx    = canvas.getContext('2d')!
-      ctx.drawImage(bitmap, 0, 0, TILE_PX, TILE_PX)
-      const { data } = ctx.getImageData(0, 0, TILE_PX, TILE_PX)
-      const elevations = new Float32Array(TILE_PX * TILE_PX)
-      for (let i = 0; i < TILE_PX * TILE_PX; i++) {
-        elevations[i] = data[i * 4] * 256 + data[i * 4 + 1] + data[i * 4 + 2] / 256 - 32768
-      }
+      const elevations = await decodeTerrariumBlob(await resp.blob())
       tileCacheW.set(key, elevations)
       return elevations
     } catch { return null }
@@ -339,6 +355,23 @@ function distToRefinedZoom(distM: number): number {
   if (distM < 81_000)  return 11   // standard=10 → refined=11
   if (distM < 152_000) return 10   // standard=9  → refined=10
   return 9                         // standard=8  → refined=9
+}
+
+// ─── Cook Inlet Ocean Correction ─────────────────────────────────────────────
+// Corrected tiles exist at z10–z13 for the Cook Inlet area around Anchorage.
+// The AWS Terrarium dataset has false elevation spikes in ocean here (SRTM gap
+// above 60°N). For zoom levels above z13 within this bbox, clamp to z13 so the
+// worker uses corrected local tiles instead of bad AWS data.
+
+const COOK_INLET_BOUNDS = { north: 61.44, south: 61.20, west: -150.00, east: -149.56 }
+
+function clampZoomForCorrectedArea(zoom: number, lat: number, lng: number): number {
+  if (zoom > 13 &&
+      lat >= COOK_INLET_BOUNDS.south && lat <= COOK_INLET_BOUNDS.north &&
+      lng >= COOK_INLET_BOUNDS.west  && lng <= COOK_INLET_BOUNDS.east) {
+    return 13
+  }
+  return zoom
 }
 
 function sampleTileGrid(
@@ -483,10 +516,10 @@ async function handleRefinePeaks(peaks: PeakRefineItem[]): Promise<void> {
   // Deduplicate tile requests across all peaks to avoid redundant fetches.
   const tileSet = new Set<string>()
   for (const peak of peaks) {
-    const refinedZoom = distToRefinedZoom(peak.distance)
     const azRad = peak.bearing * DEG_TO_RAD
     const peakLat = viewerLat + (Math.cos(azRad) * peak.distance) / 111_132
     const peakLng = viewerLng + (Math.sin(azRad) * peak.distance) / (111_320 * cosViewerLat)
+    const refinedZoom = clampZoomForCorrectedArea(distToRefinedZoom(peak.distance), peakLat, peakLng)
 
     // Fetch tiles covering the arc span (±6° at peak distance)
     const arcSpanM = peak.distance * Math.tan(REFINED_HALF_DEG * DEG_TO_RAD)
@@ -542,7 +575,10 @@ async function handleRefinePeaks(peaks: PeakRefineItem[]): Promise<void> {
     }
     arcDists.reverse()  // far → near (nearer terrain wins)
 
-    const refinedZoom = distToRefinedZoom(peak.distance)
+    const peakAzRad = peak.bearing * DEG_TO_RAD
+    const pLat = viewerLat + (Math.cos(peakAzRad) * peak.distance) / 111_132
+    const pLng = viewerLng + (Math.sin(peakAzRad) * peak.distance) / (111_320 * cosViewerLat)
+    const refinedZoom = clampZoomForCorrectedArea(distToRefinedZoom(peak.distance), pLat, pLng)
 
     for (let si = 0; si < numSamples; si++) {
       const bearingOffset = -REFINED_HALF_DEG + si * REFINED_STEP_DEG
@@ -561,7 +597,7 @@ async function handleRefinePeaks(peaks: PeakRefineItem[]): Promise<void> {
         const sLat = viewerLat + (cosA * dist) / 111_132
         const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
         // Use REFINED zoom (higher than standard) for better terrain detail
-        const zoom = distToRefinedZoom(dist)
+        const zoom = clampZoomForCorrectedArea(distToRefinedZoom(dist), sLat, sLng)
         const rawElev = sampleBest(sLat, sLng, zoom)
         const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
         const effElev  = rawElev - curvDrop
@@ -791,7 +827,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
       const sLat = viewerLat + (cosA * dist) / 111_132
       const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
-      const zoom    = distToZoom(dist)
+      const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
       const rawElev = sampleBest(sLat, sLng, zoom)
 
       const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
@@ -840,7 +876,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     }
 
     // Overall ridgeline shade
-    const ridgeZoom = distToZoom(ridgeDist)
+    const ridgeZoom = clampZoomForCorrectedArea(distToZoom(ridgeDist), ridgeLat, ridgeLng)
     const shade = hillShade(ridgeLat, ridgeLng, ridgeZoom)
 
     angles[ai]    = maxAngle
@@ -893,7 +929,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
         const sLat = viewerLat + (cosA * dist) / 111_132
         const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
-        const zoom    = distToZoom(dist)
+        const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
         const rawElev = sampleBest(sLat, sLng, zoom)
 
         const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
@@ -984,7 +1020,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
         const sLat = viewerLat + (cosA * dist) / 111_132
         const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
-        const zoom    = distToZoom(dist)
+        const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
         const rawElev = sampleBest(sLat, sLng, zoom)
 
         const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
@@ -1085,7 +1121,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
       const sLat = viewerLat + (cosA * dist) / 111_132
       const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
-      const zoom    = distToZoom(dist)
+      const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
       const rawElev = sampleBest(sLat, sLng, zoom)
       const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
       const effElev  = rawElev - curvDrop
@@ -1269,7 +1305,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
       const sLat = viewerLat + (cosA * dist) / 111_132
       const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
-      const zoom    = distToZoom(dist)
+      const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
       const rawElev = sampleBest(sLat, sLng, zoom)
 
       // Skip ocean/invalid samples
