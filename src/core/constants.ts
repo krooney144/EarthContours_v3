@@ -99,11 +99,6 @@ export const MAP_LABEL_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_only_l
 
 export const MAP_ATTRIBUTION = '© Mapzen / AWS Terrain Tiles · © OpenStreetMap · © CARTO'
 
-// Legacy aliases kept so nothing else breaks
-export const MAP_TILE_URL = MAP_LABEL_TILE_URL
-export const TOPO_TILE_URL = MAP_LABEL_TILE_URL
-export const TOPO_TILE_SUBDOMAINS = MAP_TILE_SUBDOMAINS
-
 /** Map tile size in pixels */
 export const TILE_SIZE = 256
 

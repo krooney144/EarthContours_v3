@@ -105,9 +105,9 @@ const HomeScreen: React.FC = () => {
         ))}
       </div>
 
-      {/* Version footer */}
+      {/* Version footer — update alongside package.json version */}
       <div className={styles.footer}>
-        <div className={styles.footerText}>Earth Contours v2.3</div>
+        <div className={styles.footerText}>Earth Contours v3.0</div>
       </div>
     </div>
   )

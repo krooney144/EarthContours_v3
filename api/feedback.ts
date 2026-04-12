@@ -15,7 +15,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 const GITHUB_OWNER = 'krooney144'
-const GITHUB_REPO  = 'EarthContours_v1'
+const GITHUB_REPO  = 'earthcontours_v3'
 const GITHUB_ISSUES_URL = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/issues`
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -50,7 +50,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     '',
     typeof deviceInfo === 'string' ? deviceInfo : '_Not provided_',
     '',
-    `*Submitted from EarthContours v1 at ${new Date().toISOString()}*`,
+    `*Submitted from EarthContours v3 at ${new Date().toISOString()}*`,
   ].join('\n')
 
   try {
