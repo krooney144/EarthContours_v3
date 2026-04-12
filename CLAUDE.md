@@ -82,7 +82,7 @@ Six Zustand stores in `src/store/` (re-exported from `src/store/index.ts`):
 | `src/data/peakLoader.ts` | OSM Overpass peak loader, 24 h IndexedDB cache |
 | `src/data/geoLoader.ts` | Generic GeoJSON fetcher with IndexedDB cache |
 | `src/data/geoManager.ts` | Natural Earth layer loaders (coastlines, rivers, lakes, glaciers, ocean, ice shelves) |
-| `src/data/simulatedData.ts` | Hardcoded Colorado / Alaska / Cascades peak fallback |
+| `src/data/peakDatabase.ts` | Verified worldwide peak database (~200 peaks) + bounds-based lookup |
 | `src/data/regions.ts` | Hand-tuned region metadata + bounds |
 | `src/data/feedbackService.ts` | Client-side POST to `/api/feedback` |
 | `src/workers/skylineWorker.ts` | Web Worker — 360° skyline precompute + two-pass peak refinement |
@@ -113,7 +113,7 @@ Six Zustand stores in `src/store/` (re-exported from `src/store/index.ts`):
 - **Settings** — four independent SCAN toggles (contour lines, terrain fill, band lines, silhouette lines).
 - **Debug panel** — camera state, re-projection validation, per-band health (active azimuths, elev/dist ranges, contour interval), refined arc stats, peak funnel.
 - **Gestures** — pinch zoom via `applyFovScale(scale)` (15°–100°); natural drag direction.
-- **Data** — `fetchPeaksNear(lat, lng, 130)` on location change; hardcoded fallback in `simulatedData.ts`.
+- **Data** — `fetchPeaksNear(lat, lng, 130)` on location change; static fallback from `peakDatabase.ts`.
 
 ### EXPLORE
 
