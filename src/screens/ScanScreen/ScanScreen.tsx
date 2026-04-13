@@ -1857,20 +1857,19 @@ function renderTerrain(
       const { y } = project(bearingDeg, angle, cam)
       topY[col] = Math.min(H, Math.max(0, Math.round(y)))
 
-      // Bottom = lowest contour crossing (coastline) when available.
-      // When no crossings exist at this azimuth, fill to canvas bottom (inland fallback).
-      // The ridgeline sentinel check above already handles pure ocean (elevation ≤ 0).
-      if (hasFillBound) {
+      // Bottom boundary: near bands (0-2) always fill to canvas bottom — they're
+      // terrain you're on or adjacent to. Far bands (3+) clip at the 0-level
+      // crossing (coastline) to create distant island silhouettes.
+      if (hasFillBound && bi >= 3) {
         const boundAngle = fillBoundaryAngleAt(fillBounds[bi], bearingDeg)
         if (boundAngle <= -Math.PI / 2 + 0.001) {
-          // No crossings — inland terrain between contour levels, fill to bottom
-          bottomY[col] = H
+          bottomY[col] = H  // No coast crossing — inland, fill to bottom
         } else {
           const { y: by } = project(bearingDeg, boundAngle, cam)
           bottomY[col] = Math.min(H, Math.max(0, Math.round(by)))
         }
       } else {
-        bottomY[col] = H
+        bottomY[col] = H  // Near bands: always fill to canvas bottom
       }
 
       hasVisiblePixels = true
