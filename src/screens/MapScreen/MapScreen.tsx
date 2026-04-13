@@ -854,7 +854,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     // ── Pass 2: Road overlay (zoom 8+ only, screen-blended) ──────────────────
     if (showRoads && tileZoom >= 8) {
       ctx.globalCompositeOperation = 'screen'
-      ctx.globalAlpha = 0.4
+      ctx.globalAlpha = 0.8
       await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
         loadRoadTile(tileZoom, wrappedX, tileY)
           .then((img) => {
