@@ -26,7 +26,7 @@ import './styles/global.css'
 setupGlobalErrorLogging()
 
 appLog.info('EarthContours starting...', {
-  version: '2.3.0',
+  version: '3.0.0',
   env: import.meta.env.MODE,
   buildTime: new Date().toISOString(),
   platform: navigator.platform,

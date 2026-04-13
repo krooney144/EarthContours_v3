@@ -1,7 +1,7 @@
 // Placeholder removed — full SCAN implementation below.
 
 /**
- * EarthContours — SCAN Screen  (v2.2)
+ * EarthContours — SCAN Screen  (v3.0)
  *
  * First-person terrain panorama with depth-layered ridgeline rendering.
  *
@@ -1398,6 +1398,58 @@ function bandDistAt(
   return d0 * (1 - t) + d1 * t
 }
 
+/**
+ * Determine the fill-bottom screen Y for a column, accounting for ocean.
+ * If there's continuous land between the viewer and the band's ridgeline, returns H (fill to bottom).
+ * If there's an ocean gap, returns the projected Y of the coastline where the island meets water —
+ * so the fill only covers the land silhouette, not the ocean below.
+ */
+function coastClipY(
+  skyline: SkylineData,
+  bandDist: number,
+  bearingDeg: number,
+  cam: CameraParams,
+): number {
+  if (!skyline.coastData || !skyline.coastOffsets) return cam.H
+
+  const normBearing = ((bearingDeg % 360) + 360) % 360
+  const fracIdx = normBearing * skyline.resolution
+  const ai = Math.round(fracIdx) % skyline.numAzimuths
+
+  const startIdx = skyline.coastOffsets[ai]
+  const endIdx   = skyline.coastOffsets[ai + 1]
+  if (startIdx === endIdx) return cam.H  // No transitions → continuous land
+
+  // Walk transitions near→far (viewer starts on land).
+  // Find the last water→land transition before the ridgeline distance.
+  // That's the coastline (base of the island silhouette).
+  let hasWaterGap = false
+  let lastCoastDist = -1  // distance of last water→land transition (island base)
+
+  for (let i = startIdx; i < endIdx; i += 2) {
+    const tDist = skyline.coastData[i]
+    const outwardState = skyline.coastData[i + 1]  // 1.0 = entering land, 0.0 = entering water
+
+    if (tDist > bandDist) break  // Past the ridgeline
+
+    if (outwardState < 0.5) {
+      // Entering water going outward
+      hasWaterGap = true
+    } else {
+      // Entering land going outward (water→land = island coastline)
+      if (hasWaterGap) lastCoastDist = tDist
+    }
+  }
+
+  if (lastCoastDist < 0) return cam.H  // No ocean gap → fill to bottom
+
+  // Project the coastline (elevation ≈ 0) at the coast distance
+  const curvDrop = (lastCoastDist * lastCoastDist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+  const coastAngle = Math.atan2(-curvDrop - skyline.computedAt.elev, lastCoastDist)
+  const { y } = project(bearingDeg, coastAngle, cam)
+  return Math.min(cam.H, Math.max(0, Math.round(y)))
+}
+
 /** Interpolated GPS coords of the ridgeline point at a fractional bearing for a given band.
  *  Returns null if no ridge at this azimuth. */
 function bandGpsAt(
@@ -1750,33 +1802,51 @@ function renderTerrain(
     const lwMax = bandCfg ? bandCfg.maxDist : 1
     const lwRange = lwMax - lwMin
 
-    // ── Fill below this band's ridgeline ───────────────────────────────────
-    ctx.beginPath()
-    ctx.moveTo(0, H)
+    // ── Fill below this band's ridgeline (ocean-aware) ──────────────────────
+    // Trace the ridgeline left→right, then trace the adaptive bottom boundary
+    // right→left. Where there's ocean between viewer and ridgeline, the bottom
+    // clips to the coastline angle instead of canvas bottom H.
+    const hasCoastData = skyline.coastData && skyline.coastOffsets && skyline.coastData.length > 0
+    const bottomY = new Float32Array(W)  // per-column bottom boundary
+    const topY    = new Float32Array(W)  // per-column ridgeline Y
     let hasVisiblePixels = false
 
     for (let col = 0; col < W; col++) {
       const bearingDeg = cam.heading_deg + (col / W - 0.5) * cam.hfov
       const angle = bandAngleAt(skyline, bi, bearingDeg, projected)
 
-      // Skip columns where this band has no data (sentinel -PI/2)
       if (angle <= -Math.PI / 2 + 0.001) {
-        ctx.lineTo(col, H)
+        topY[col] = H
+        bottomY[col] = H
         continue
       }
 
       hasVisiblePixels = true
       const { y } = project(bearingDeg, angle, cam)
-      const screenY = Math.round(y)
-      ctx.lineTo(col, Math.min(H, Math.max(0, screenY)))
+      topY[col] = Math.min(H, Math.max(0, Math.round(y)))
+
+      // Coast clipping: if ocean lies between viewer and this band's ridgeline,
+      // clip the fill bottom to the coastline instead of canvas bottom.
+      if (hasCoastData) {
+        const dist = bandDistAt(skyline, bi, bearingDeg)
+        bottomY[col] = coastClipY(skyline, dist, bearingDeg, cam)
+      } else {
+        bottomY[col] = H
+      }
     }
 
-    ctx.lineTo(W, H)
-    ctx.closePath()
-    // Band fill: always draw as base coat (unified terrain color).
-    // Covers sky completely from ridgeline to canvas bottom.
-    // Silhouette layer fills draw on top but are no longer needed for coverage.
     if (hasVisiblePixels && showFill) {
+      ctx.beginPath()
+      // Trace bottom boundary left→right, then ridgeline right→left
+      ctx.moveTo(0, bottomY[0])
+      for (let col = 0; col < W; col++) {
+        ctx.lineTo(col, topY[col])
+      }
+      // Trace bottom boundary right→left
+      for (let col = W - 1; col >= 0; col--) {
+        ctx.lineTo(col, bottomY[col])
+      }
+      ctx.closePath()
       ctx.fillStyle = darkMode ? TERRAIN_FILL_DARK : TERRAIN_FILL_LIGHT
       ctx.fill()
     }

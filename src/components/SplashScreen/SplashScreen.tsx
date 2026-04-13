@@ -111,7 +111,7 @@ const SplashScreen: React.FC = () => {
         </div>
       </div>
 
-      <div className={styles.version}>v2.3</div>
+      <div className={styles.version}>v3.0</div>
     </div>
   )
 }

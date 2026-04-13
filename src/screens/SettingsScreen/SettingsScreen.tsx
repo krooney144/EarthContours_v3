@@ -501,7 +501,7 @@ const SettingsScreen: React.FC = () => {
         {/* Version info */}
         <div className={styles.versionInfo}>
           <div className={styles.logoMark}>◈</div>
-          <div className={styles.versionText}>Earth Contours v2.3</div>
+          <div className={styles.versionText}>Earth Contours v3.0</div>
           <div className={styles.versionText}>Built with React + Vite + Zustand</div>
           <div className={styles.versionText}>Map tiles © OpenTopoMap contributors</div>
         </div>

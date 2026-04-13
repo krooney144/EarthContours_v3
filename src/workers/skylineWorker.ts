@@ -161,6 +161,11 @@ export interface SkylineData {
   silhouette:  SilhouetteDataW | null
   /** Dense near-field elevation profile (0–2km) for opaque terrain occlusion */
   nearProfile: NearFieldProfileW | null
+  /** Per-azimuth coast transitions — packed [dist, outwardState, ...] in near→far order.
+   *  outwardState: 1.0 = land, 0.0 = water (what you enter going away from viewer). */
+  coastData:    Float32Array
+  /** Per-azimuth offset into coastData (length = numAzimuths + 1). */
+  coastOffsets: Uint32Array
   /** Steps per degree used during computation */
   resolution:  number
   /** Total azimuth steps (= 360 × resolution) */
@@ -402,6 +407,38 @@ function sampleBest(lat: number, lng: number, zoom: number): number {
   const grid = tileCacheW.get(`${zoom}/${tx}/${ty}`)
   if (grid) return Math.max(0, sampleTileGrid(grid, lat, lng, zoom, tx, ty))
   return 0  // No tile cached — assume sea level (tiles are prefetched so this rarely fires)
+}
+
+/** Raw elevation without ocean clamping — returns true Terrarium value (negative for ocean).
+ *  Used only for water/land classification; all terrain rendering uses sampleBest(). */
+function sampleRaw(lat: number, lng: number, zoom: number): number {
+  const { x: tx, y: ty } = latLngToTileXY(lat, lng, zoom)
+  const grid = tileCacheW.get(`${zoom}/${tx}/${ty}`)
+  if (grid) return sampleTileGrid(grid, lat, lng, zoom, tx, ty)
+  return 0
+}
+
+// ─── Below-sea-level land exclusion zones ───────────────────────────────────
+// Only checked when raw elevation < -10m to avoid misclassifying land depressions as ocean.
+const BELOW_SEA_LEVEL_LAND = [
+  { south: 35.5, north: 36.8, west: -117.5, east: -116.4 },  // Death Valley
+  { south: 31.0, north: 31.8, west: 35.3,   east: 35.6   },  // Dead Sea
+  { south: 28.5, north: 30.5, west: 25.5,   east: 28.5   },  // Qattara Depression
+  { south: 42.0, north: 43.5, west: 87.5,   east: 90.0   },  // Turpan Depression
+]
+
+function isExcludedDepression(lat: number, lng: number): boolean {
+  for (const z of BELOW_SEA_LEVEL_LAND) {
+    if (lat >= z.south && lat <= z.north && lng >= z.west && lng <= z.east) return true
+  }
+  return false
+}
+
+/** Classify a sample point as water (true) or land (false) based on raw elevation. */
+function classifyWater(rawElev: number, lat: number, lng: number, prevWasWater: boolean): boolean {
+  if (rawElev > 2.0) return false                                     // clearly land
+  if (rawElev < -10.0) return !isExcludedDepression(lat, lng)         // deep = ocean (unless exclusion zone)
+  return prevWasWater                                                 // fringe: inherit previous state
 }
 
 /** Hill shade at a terrain point (NW-45° light). */
@@ -791,6 +828,10 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     return Array.from({ length: bandAz }, () => [])
   })
 
+  // Temp storage for coast transitions: per-azimuth
+  // coastTransTemp[ai] = [dist, toLand, dist, toLand, ...] (2 floats per transition)
+  const coastTransTemp: number[][] = Array.from({ length: numAzimuths }, () => [])
+
   // Pass 1: Standard resolution (720 azimuths) — populates overall skyline + standard bands
   for (let ai = 0; ai < numAzimuths; ai++) {
     const azDeg  = ai / resolution
@@ -823,12 +864,32 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     const bandPrevLat:  number[] = new Array(DEPTH_BANDS.length).fill(viewerLat)
     const bandPrevLng:  number[] = new Array(DEPTH_BANDS.length).fill(viewerLng)
 
+    // Coast transition tracking — logDists goes far→near, transitions stored far→near
+    // then reversed to near→far during packing so renderer can walk outward from viewer.
+    // Each transition = (dist, outwardState) where outwardState is what you enter going
+    // AWAY from viewer past this distance: 1.0 = land, 0.0 = water.
+    let prevWasWater = false
+    let coastFirstSample = true
+
     for (const dist of logDists) {
       const sLat = viewerLat + (cosA * dist) / 111_132
       const sLng = viewerLng + (sinA * dist) / (111_320 * cosViewerLat)
 
       const zoom    = clampZoomForCorrectedArea(distToZoom(dist), sLat, sLng)
       const rawElev = sampleBest(sLat, sLng, zoom)
+
+      // Water classification — uses unclamped elevation from same tile
+      const trueElev = sampleRaw(sLat, sLng, zoom)
+      const isWater = classifyWater(trueElev, sLat, sLng, prevWasWater)
+      if (coastFirstSample) {
+        prevWasWater = isWater
+        coastFirstSample = false
+      } else if (isWater !== prevWasWater) {
+        // Transition detected. March goes far→near, so prevWasWater is the FAR-side state.
+        // outwardState = what you enter going outward past this distance = prevWasWater.
+        coastTransTemp[ai].push(dist, prevWasWater ? 0.0 : 1.0)
+        prevWasWater = isWater
+      }
 
       const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
       const effElev   = rawElev - curvDrop
@@ -1231,6 +1292,32 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     bands[bi].crossingOffsets = offsets
   }
 
+  // ── Phase 5a: Pack coast transitions into flat arrays (near→far order) ────
+  // Transitions were collected far→near during the march; reverse pairs during packing
+  // so the renderer can walk outward from the viewer.
+
+  const coastOffsets = new Uint32Array(numAzimuths + 1)
+  let coastTotalFloats = 0
+  for (let ai = 0; ai < numAzimuths; ai++) {
+    coastOffsets[ai] = coastTotalFloats
+    coastTotalFloats += coastTransTemp[ai].length  // already in pairs of 2
+  }
+  coastOffsets[numAzimuths] = coastTotalFloats
+
+  const coastData = new Float32Array(coastTotalFloats)
+  let coastIdx = 0
+  for (let ai = 0; ai < numAzimuths; ai++) {
+    const trans = coastTransTemp[ai]
+    // Reverse pairs: march stored far→near, renderer wants near→far
+    for (let j = trans.length - 2; j >= 0; j -= 2) {
+      coastData[coastIdx++] = trans[j]      // distance
+      coastData[coastIdx++] = trans[j + 1]  // outwardState (1.0=land, 0.0=water)
+    }
+  }
+
+  const coastTransCount = coastTotalFloats / 2
+  console.log(`[COAST] Packed ${coastTransCount} transitions across ${numAzimuths} azimuths (${(coastTotalFloats * 4 / 1024).toFixed(0)} KB)`)
+
   // ── Phase 5b: Pack silhouette candidates into flat transferable arrays ────
 
   const silOffsets = new Uint32Array(SILHOUETTE_NUM_AZIMUTHS + 1)
@@ -1358,6 +1445,8 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     refinedArcs: [],  // Arcs now come via separate 'refine-peaks' → 'refined-arcs' flow
     silhouette,
     nearProfile,
+    coastData,
+    coastOffsets,
     resolution,
     numAzimuths,
     computedAt: {
@@ -1369,7 +1458,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     },
   }
 
-  // Transfer ArrayBuffers (zero-copy) — include band + silhouette + near-profile buffers
+  // Transfer ArrayBuffers (zero-copy) — include band + silhouette + near-profile + coast buffers
   const transferables: Transferable[] = [
     angles.buffer as ArrayBuffer,
     distances.buffer as ArrayBuffer,
@@ -1378,6 +1467,8 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     silOffsets.buffer as ArrayBuffer,
     npData.buffer as ArrayBuffer,
     npCounts.buffer as ArrayBuffer,
+    coastData.buffer as ArrayBuffer,
+    coastOffsets.buffer as ArrayBuffer,
   ]
   for (const band of bands) {
     transferables.push(
