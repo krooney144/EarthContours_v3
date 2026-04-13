@@ -367,7 +367,7 @@ function matchSilhouetteStrands(
   // peakAngle by buildSilhouetteLayers (atan2(effElev - viewerElev, dist)).
   // Camera pitch only affects where on screen things are drawn, not whether
   // silhouette lines exist. Same mountain at same AGL = same silhouettes.
-  const MIN_PEAK_ANGLE = -0.35  // ~-20° below horizon
+  const MIN_PEAK_ANGLE = -0.30  // ~-17° below horizon
 
   // Determine visible azimuth range
   const bearingStart = heading_deg - hfov * 0.5
@@ -569,7 +569,7 @@ const GLOW_BLUR_NEAR    = 20    // px — tight intense glow on very close terra
 const GLOW_BLUR_FAR     = 3     // px — subtle whisper on distant ridgelines
 const GLOW_MAX_ALPHA    = 0.55  // max glow opacity at peak prominence + near + high angle
 const GLOW_DIST_FLOOR   = 0.06  // even the farthest ridge gets a small glow floor
-const GLOW_ANGLE_ZERO   = -0.35 // rad — matches MIN_PEAK_ANGLE; all visible silhouette terrain gets glow
+const GLOW_ANGLE_ZERO   = -0.30 // rad — matches MIN_PEAK_ANGLE; all visible silhouette terrain gets glow
 const GLOW_ANGLE_FULL   = 0.10  // rad — glow reaches full intensity above this angle
 const GLOW_PROMINENCE_SCALE = 150 // metres — ridge this far above its valley = full tProminence
 
@@ -604,7 +604,7 @@ function renderSilhouetteGlow(
   const elevRange = globalElevMax - globalElevMin
   const hasElevRange = elevRange > 1
   const maxDist = 400_000
-  const MIN_PEAK_ANGLE = -0.35
+  const MIN_PEAK_ANGLE = -0.30
   const MAX_ANGLE_JUMP = 0.005
   const MIN_STRAND_SEGS = 8
   const numAzimuths = silResolution * 360
@@ -780,7 +780,7 @@ function renderSilhouetteStrokes(
   const MIN_STRAND_SEGS = 8   // Eliminate short dash artifacts — 8 segs = 1° bearing
   const MAX_AZ_GAP_FOR_STROKE = 4  // Match the matching gap tolerance
   // Fixed min angle — AGL already baked into peakAngle, pitch is viewport only
-  const MIN_PEAK_ANGLE = -0.35  // ~-20° below horizon
+  const MIN_PEAK_ANGLE = -0.30  // ~-17° below horizon
 
   for (const strand of strands) {
     const segs = strand.segments
@@ -2625,7 +2625,7 @@ const ScanScreen: React.FC = () => {
   } = useCameraStore()
   const { activeLat, activeLng, mode, gpsLat, requestGPS, switchToGPS } = useLocationStore()
   const { peaks } = useTerrainStore()
-  const { units, showPeakLabels, showBandLines, showFill, showDebugPanel, showContourLines, showSilhouetteLines, darkMode } = useSettingsStore()
+  const { units, showPeakLabels, showBandLines, showFill, showDebugPanel, showContourLines, showSilhouetteLines, seeThroughMountains, darkMode } = useSettingsStore()
 
   const viewportRef      = useRef<HTMLDivElement>(null)
   const terrainCanvasRef = useRef<HTMLCanvasElement>(null)
@@ -2698,11 +2698,13 @@ const ScanScreen: React.FC = () => {
 
   // ── Pre-build contour strands (full 360°, one-time on data/AGL change) ────
   // Uses the worker's z15-corrected ground elevation so contour angles match ridgelines.
+  // When seeThroughMountains is on, skip the visibility envelope so all contours draw.
   const contourStrands = useMemo<PrebuiltContourStrand[]>(() => {
     if (!skylineData) return []
     const viewerElev = skylineData.computedAt.groundElev + height_m
-    return buildContourStrands(skylineData, viewerElev, visibilityEnvelope)
-  }, [skylineData, height_m, visibilityEnvelope])
+    const envelope = seeThroughMountains ? null : visibilityEnvelope
+    return buildContourStrands(skylineData, viewerElev, envelope)
+  }, [skylineData, height_m, visibilityEnvelope, seeThroughMountains])
 
   // ── Pre-build fill boundaries (lowest crossing angle per-band per-azimuth) ──
   // The 0-level contour traces the coastline; this gives the fill polygon its
