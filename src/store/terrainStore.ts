@@ -18,7 +18,7 @@ import { createLogger } from '../core/logger'
 import { TerrainLoadError } from '../core/errors'
 import { loadRegionElevation, adaptiveZoomForArea, TERRAIN_ZOOM } from '../data/elevationLoader'
 // generateSimulatedTerrain removed — always use real elevation data
-import { COLORADO_PEAKS, ALASKA_PEAKS } from '../data/simulatedData'
+import { getPeaksInBounds } from '../data/peakDatabase'
 import { fetchPeaksInBounds } from '../data/peakLoader'
 import { REGIONS } from '../data/regions'
 import { TERRAIN_GRID_SIZE, ENU_M_PER_DEG_LAT, ENU_M_PER_DEG_LON_AT_LAT } from '../core/constants'
@@ -92,12 +92,11 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
     set({ loadingState: 'loading', loadingProgress: 0, loadingMessage: 'Loading elevation data...', activeRegion: region, isCustomBounds: false })
 
     try {
-      // ── Phase 1: Peak data ────────────────────────────────────────────────
+      // ── Phase 1: Peak data (bounds-based lookup — works for ANY region) ──
       set({ loadingProgress: 5, loadingMessage: 'Loading peak data...' })
-      const peaks =
-        regionId === 'colorado-rockies' ? COLORADO_PEAKS :
-        ALASKA_PEAKS
-      log.info('Peak data loaded', { peaks: peaks.length })
+      const { north, south, east, west } = region.bounds
+      const peaks = getPeaksInBounds(north, south, east, west)
+      log.info('Peak data loaded', { peaks: peaks.length, region: regionId })
       set({ peaks, loadingProgress: 15 })
 
       // ── Phase 2: Real elevation data with retry at lower zoom ────────────
@@ -234,14 +233,18 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
     })
 
     try {
-      // ── Phase 1: Fetch OSM peaks for the selected bounds ────────────────
+      // ── Phase 1: Fetch OSM peaks, fall back to static database ──────────
       set({ loadingProgress: 3, loadingMessage: 'Fetching peak data...' })
       let peaks: Peak[] = []
       try {
         peaks = await fetchPeaksInBounds(south, west, north, east)
         log.info('OSM peaks loaded for custom bounds', { count: peaks.length })
       } catch (peakErr) {
-        log.warn('OSM peak fetch failed for custom bounds', { err: String(peakErr) })
+        log.warn('OSM peak fetch failed, using static database', { err: String(peakErr) })
+      }
+      if (peaks.length === 0) {
+        peaks = getPeaksInBounds(north, south, east, west)
+        log.info('Static database peaks loaded for custom bounds', { count: peaks.length })
       }
       set({ peaks, loadingProgress: 12 })
 

@@ -22,7 +22,7 @@ EarthContours renders real elevation data across five screens, all driven from t
 
 **Natural Earth** 1:10m GeoJSON (coastlines, rivers, lakes, glaciers, ocean, antarctic ice shelves) ships from `public/geo/` and powers the Map overlays.
 
-**Peaks** load worldwide from OpenStreetMap Overpass (`node["natural"="peak"]`) and are cached for 24 h in IndexedDB. Colorado / Alaska / Cascades peak lists in `simulatedData.ts` are the offline fallback.
+**Peaks** load worldwide from OpenStreetMap Overpass (`node["natural"="peak"]`) and are cached for 24 h in IndexedDB. A verified worldwide peak database in `peakDatabase.ts` (~200 peaks, USGS/NGS sourced) is the primary/instant source for predefined regions and the offline fallback for custom bounds.
 
 ---
 
@@ -106,7 +106,7 @@ EarthContours_v3/
 │   │   └── errors.ts               # Recoverable vs fatal error classes
 │   ├── data/
 │   │   ├── regions.ts              # Hand-tuned region metadata (Colorado / Alaska / Cascades)
-│   │   ├── simulatedData.ts        # Hardcoded peak fallback for the 3 regions
+│   │   ├── peakDatabase.ts         # Verified worldwide peak database (~200 peaks)
 │   │   ├── elevationLoader.ts      # 4-tier elevation loader (memory → IDB → local → AWS)
 │   │   ├── ScanTileCache.ts        # Multi-zoom tile cache (z8–z15) for SCAN 400 km range
 │   │   ├── peakLoader.ts           # OSM Overpass peak loader, 24 h IndexedDB cache
