@@ -146,6 +146,15 @@ interface NearFieldProfileW {
   floatsPerSample: 2
 }
 
+/** Full-range terrain profile for contour visibility occlusion (mirrors types.ts TerrainProfile). */
+interface TerrainProfileW {
+  profileData: Float32Array
+  distances:   Float32Array
+  numSteps:    number
+  resolution:  number
+  numAzimuths: number
+}
+
 export interface SkylineData {
   /** Max elevation angle (radians) at each azimuth step */
   angles:      Float32Array
@@ -159,6 +168,8 @@ export interface SkylineData {
   refinedArcs: RefinedArc[]
   /** Depth-peeled silhouette candidates (AGL-independent, all azimuths) */
   silhouette:  SilhouetteDataW | null
+  /** Full-range terrain profile for contour visibility occlusion (capped ~150km) */
+  terrainProfile: TerrainProfileW | null
   /** Dense near-field elevation profile (0–2km) for opaque terrain occlusion */
   nearProfile: NearFieldProfileW | null
   /** Per-azimuth coast transitions — packed [dist, outwardState, ...] in near→far order.
@@ -1158,6 +1169,17 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     }
   }
 
+  // ── Terrain profile: store effElev at every distance step up to ~150km ──
+  const PROFILE_MAX_DIST = 150_000
+  let numProfileSteps = 0
+  for (let i = 0; i < silDistsDeduped.length; i++) {
+    if (silDistsDeduped[i] <= PROFILE_MAX_DIST) numProfileSteps = i + 1
+    else break
+  }
+  const profileDistArr = new Float32Array(numProfileSteps)
+  for (let i = 0; i < numProfileSteps; i++) profileDistArr[i] = silDistsDeduped[i]
+  const profileData = new Float32Array(SILHOUETTE_NUM_AZIMUTHS * numProfileSteps)
+
   // Per-azimuth silhouette candidate heaps
   const silCandidatesTemp: SilCandidate[][] = new Array(SILHOUETTE_NUM_AZIMUTHS)
 
@@ -1187,6 +1209,11 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
       const rawElev = sampleBest(sLat, sLng, zoom)
       const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
       const effElev  = rawElev - curvDrop
+
+      // Store in terrain profile (within 150km cap)
+      if (si < numProfileSteps) {
+        profileData[ai * numProfileSteps + si] = effElev
+      }
 
       // Detect local maxima: effElev was rising, now falling
       if (wasRising && effElev < prevEffElev) {
@@ -1438,6 +1465,16 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     floatsPerSample: NEAR_PROFILE_FPS as 2,
   }
 
+  const terrainProfile: TerrainProfileW = {
+    profileData:  profileData,
+    distances:    profileDistArr,
+    numSteps:     numProfileSteps,
+    resolution:   SILHOUETTE_RESOLUTION,
+    numAzimuths:  SILHOUETTE_NUM_AZIMUTHS,
+  }
+
+  console.log(`[TERRAIN-PROFILE] ${numProfileSteps} steps/az × ${SILHOUETTE_NUM_AZIMUTHS} az = ${(profileData.byteLength / (1024 * 1024)).toFixed(1)} MB (cap ${PROFILE_MAX_DIST / 1000}km)`)
+
   const skyline: SkylineData = {
     angles,
     distances,
@@ -1445,6 +1482,7 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     bands,
     refinedArcs: [],  // Arcs now come via separate 'refine-peaks' → 'refined-arcs' flow
     silhouette,
+    terrainProfile,
     nearProfile,
     coastData,
     coastOffsets,
@@ -1466,6 +1504,8 @@ async function computeSkyline(req: SkylineRequest): Promise<void> {
     shading.buffer as ArrayBuffer,
     silData.buffer as ArrayBuffer,
     silOffsets.buffer as ArrayBuffer,
+    profileData.buffer as ArrayBuffer,
+    profileDistArr.buffer as ArrayBuffer,
     npData.buffer as ArrayBuffer,
     npCounts.buffer as ArrayBuffer,
     coastData.buffer as ArrayBuffer,

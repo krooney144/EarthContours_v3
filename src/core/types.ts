@@ -538,6 +538,32 @@ export const NEAR_PROFILE_MAX_DIST = 2000
 export const NEAR_PROFILE_AGL_LIMIT = 60
 
 /**
+ * Full-range terrain profile for contour visibility occlusion.
+ * Stores the effective elevation (rawElev − curvDrop) at every distance step
+ * of the Phase 4c silhouette march, for each azimuth.  AGL-independent —
+ * the main thread computes a running-max-angle envelope at the current
+ * viewer height to determine which contour crossings are hidden behind
+ * closer terrain.
+ *
+ * Capped at ~150 km (beyond that, existing occlusion works fine).
+ * Memory: 2880 azimuths × ~1000 steps × 4 bytes ≈ 11.5 MB.
+ * Envelope recompute: ~2.9M multiply+compare ops ≈ 5–10 ms on mobile.
+ */
+export interface TerrainProfile {
+  /** Effective elevation at each (azimuth, distance step), row-major.
+   *  Index: ai * numSteps + si.  effElev = rawElev − curvDrop. */
+  profileData: Float32Array
+  /** Shared distance breakpoints in metres, sorted ascending (length = numSteps). */
+  distances: Float32Array
+  /** Number of distance steps per azimuth. */
+  numSteps: number
+  /** Azimuth resolution (steps per degree). Matches silhouette resolution (8). */
+  resolution: number
+  /** Total azimuths = 360 × resolution. */
+  numAzimuths: number
+}
+
+/**
  * Dense near-field elevation profile for proper terrain occlusion.
  * Stores raw (elevation, distance) pairs at ~50 evenly-log-spaced samples
  * per azimuth for the 0–2km range.  AGL-independent — the main thread
@@ -605,6 +631,12 @@ export interface SkylineData {
    *  at render time via front-to-back sweep.  Null if silhouette computation
    *  was skipped (e.g. very old worker). */
   silhouette: SilhouetteData | null
+  /** Full-range terrain profile for contour visibility occlusion.
+   *  Stores effElev at every Phase 4c distance step per azimuth (capped ~150 km).
+   *  The main thread builds a running-max-angle envelope from this to determine
+   *  which contour crossings are hidden behind closer terrain.
+   *  Null if not computed (e.g. very old worker). */
+  terrainProfile: TerrainProfile | null
   /** Dense near-field elevation profile (0–2km) for opaque terrain occlusion.
    *  Fixes the "see-through mountains" problem where band fills only capture
    *  the ridgeline, not the full terrain surface shape.

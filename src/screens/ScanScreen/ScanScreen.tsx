@@ -914,6 +914,56 @@ function renderSilhouetteStrokes(
   }
 }
 
+// ─── Visibility Envelope (profile-based contour occlusion) ────────────────────
+
+/** Precomputed running-max-angle envelope from the raw terrain profile.
+ *  At each azimuth and distance, stores the maximum elevation-angle ratio
+ *  from all terrain between the viewer and that distance.  Used to determine
+ *  which contour crossings are hidden behind closer terrain. */
+interface VisibilityEnvelope {
+  /** Running max of (effElev − viewerElev) / dist, row-major: ai * numSteps + si. */
+  envelope:     Float32Array
+  /** Distance breakpoints in metres (shared across azimuths). */
+  distances:    Float32Array
+  numSteps:     number
+  numAzimuths:  number
+  resolution:   number
+}
+
+/** Binary search: find largest index where distances[i] <= dist.  Returns -1 if dist < distances[0]. */
+function profileDistIndex(distances: Float32Array, dist: number): number {
+  let lo = 0, hi = distances.length - 1
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1
+    if (distances[mid] <= dist) lo = mid + 1
+    else hi = mid - 1
+  }
+  return hi
+}
+
+/** Build the visibility envelope from the terrain profile at a given viewer elevation.
+ *  Uses ratio comparison instead of atan2 for performance. */
+function buildVisibilityEnvelope(
+  profileData: Float32Array,
+  distances: Float32Array,
+  numSteps: number,
+  numAzimuths: number,
+  resolution: number,
+  viewerElev: number,
+): VisibilityEnvelope {
+  const envelope = new Float32Array(numAzimuths * numSteps)
+  for (let ai = 0; ai < numAzimuths; ai++) {
+    let maxRatio = -Infinity
+    const offset = ai * numSteps
+    for (let si = 0; si < numSteps; si++) {
+      const ratio = (profileData[offset + si] - viewerElev) / distances[si]
+      if (ratio > maxRatio) maxRatio = ratio
+      envelope[offset + si] = maxRatio
+    }
+  }
+  return { envelope, distances, numSteps, numAzimuths, resolution }
+}
+
 // ─── Contour Strand Precomputation ────────────────────────────────────────────
 
 /** Contour interval in metres for each depth band index.
@@ -941,6 +991,7 @@ interface PrebuiltContourStrand {
 function buildContourStrands(
   skyline: SkylineData,
   viewerElev: number,
+  envelope: VisibilityEnvelope | null,
 ): PrebuiltContourStrand[] {
   const completed: PrebuiltContourStrand[] = []
 
@@ -978,20 +1029,24 @@ function buildContourStrands(
         azCrossings.sort((a, b) => a.dist - b.dist)
 
         // Occlusion sweep: skip crossings hidden behind nearer terrain.
-        // For near bands (0–2), disable within-band occlusion — these bands span
-        // wide depth ranges (e.g. 0–4.5km) where a hillside at 200m would wrongly
-        // occlude all contours out to 4.5km. Painter's order rendering handles
-        // visual overlap correctly without data-level occlusion.
-        // For far bands (3+), within-band occlusion remains useful since crossings
-        // are at similar depths where true occlusion is meaningful.
-        let runningMaxAngle = -Math.PI / 2
-        const useOcclusion = bi >= 3  // Only occlude within mid/mid-far/far bands
+        // Uses the visibility envelope (built from the full terrain profile)
+        // to check ALL bands uniformly — the envelope captures every terrain
+        // feature at every distance, so no band-specific exceptions are needed.
         for (const c of azCrossings) {
           const curvDrop = (c.dist * c.dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
           const angle = Math.atan2(c.elev - curvDrop - viewerElev, c.dist)
 
-          if (useOcclusion && angle <= runningMaxAngle) continue
-          if (useOcclusion) runningMaxAngle = angle
+          // Profile-based occlusion: check if any closer terrain blocks this crossing
+          if (envelope) {
+            const normB = ((bearingDeg % 360) + 360) % 360
+            const envAi = Math.round(normB * envelope.resolution) % envelope.numAzimuths
+            const si = profileDistIndex(envelope.distances, c.dist)
+            if (si >= 0) {
+              const maxRatio = envelope.envelope[envAi * envelope.numSteps + si]
+              const crossingRatio = (c.elev - curvDrop - viewerElev) / c.dist
+              if (crossingRatio <= maxRatio) continue  // hidden behind closer terrain
+            }
+          }
 
           // Skip sea-level / near-sea-level elevation — avoids coastline artifacts
           if (c.elev < 1) continue
@@ -1636,24 +1691,14 @@ function renderBandContours(
   cam: CameraParams,
   globalElevMin: number,
   globalElevMax: number,
-  silhouetteLayers: SilhouetteLayer[][] | null,
-  silResolution: number,
   darkMode: boolean = true,
 ): void {
   const { W, H } = cam
   const elevRange = globalElevMax - globalElevMin
   const hasElevRange = elevRange > 1
 
-  // ── Silhouette occlusion setup ──────────────────────────────────────────
-  // For each contour point we check ALL silhouette layers at that azimuth
-  // that are CLOSER than the contour. If any closer surface's peakY is
-  // above (lower Y) the contour's screen Y, the contour is occluded.
-  // This handles intermediate surfaces correctly — a contour at 20km behind
-  // a silhouette at 10km is culled even though the nearest surface at 3km
-  // is below it on screen.
-  const hasSilOcclusion = !!(silhouetteLayers && silResolution > 0)
-  const numSilAz = hasSilOcclusion ? silResolution * 360 : 0
-  const OCCLUSION_TOLERANCE_PX = 2  // Cull contours within 2px of ridgeline edge
+  // Occlusion is handled at strand-build time via the visibility envelope —
+  // strands only contain visible contour crossings.  No render-time check needed.
 
   // Logarithmic distance → line width mapping (replaces old 0.2 power curve).
   // log10(1 + d_km) / log10(401) maps 0–400km to 0–1 with even distribution.
@@ -1704,37 +1749,6 @@ function renderBandContours(
       if (!onScreen) {
         if (pathStarted) { ctx.stroke(); pathStarted = false }
         continue
-      }
-
-      // ── Silhouette occlusion check (multi-layer screen-Y) ──────────────
-      // Check ALL silhouette layers at this bearing that are CLOSER than
-      // the contour point. If ANY closer surface has a peakY above (<=)
-      // the contour's screen Y, the contour is behind that surface.
-      // Layers are sorted near→far, so we iterate until dist >= pt.dist.
-      if (hasSilOcclusion && silhouetteLayers) {
-        const normBearing = ((pt.bearingDeg % 360) + 360) % 360
-        const ai = Math.round(normBearing * silResolution) % numSilAz
-        const azLayers = silhouetteLayers[ai]
-        let occluded = false
-        if (azLayers) {
-          for (let li = 0; li < azLayers.length; li++) {
-            const layer = azLayers[li]
-            if (layer.isOcean) continue
-            // Only check surfaces CLOSER than this contour point
-            if (layer.dist >= pt.dist) break  // layers sorted near→far, done
-            // Project this closer surface's peak to screen Y
-            const silPeak = project(pt.bearingDeg, layer.peakAngle, cam)
-            if (y >= silPeak.y - OCCLUSION_TOLERANCE_PX) {
-              // Contour point is at or below a closer surface's ridgeline
-              occluded = true
-              break
-            }
-          }
-        }
-        if (occluded) {
-          if (pathStarted) { ctx.stroke(); pathStarted = false }
-          continue
-        }
       }
 
       // Logarithmic width: distributes variation evenly across 0–400km
@@ -1898,8 +1912,7 @@ function renderTerrain(
       // Filter strands belonging to this band
       const bandStrands = contourStrands.filter(s => s.bandIdx === bi)
       if (bandStrands.length > 0) {
-        renderBandContours(ctx, bandStrands, cam, globalElevMin, globalElevMax,
-          silhouetteLayers, silResolution, darkMode)
+        renderBandContours(ctx, bandStrands, cam, globalElevMin, globalElevMax, darkMode)
       }
     }
 
@@ -2668,13 +2681,28 @@ const ScanScreen: React.FC = () => {
     return reprojectBands(skylineData, viewerElev)
   }, [skylineData, height_m])
 
+  // ── Build visibility envelope from terrain profile (AGL-dependent) ──────────
+  // Converts the raw effElev profile into a running-max-angle envelope.
+  // ~2.9M multiply+compare ops ≈ 5–10ms on mobile.
+  const visibilityEnvelope = useMemo<VisibilityEnvelope | null>(() => {
+    const tp = skylineData?.terrainProfile
+    if (!tp) return null
+    const viewerElev = skylineData!.computedAt.groundElev + height_m
+    const t0 = performance.now()
+    const env = buildVisibilityEnvelope(
+      tp.profileData, tp.distances, tp.numSteps, tp.numAzimuths, tp.resolution, viewerElev,
+    )
+    log.info('Visibility envelope built', { steps: tp.numSteps, ms: (performance.now() - t0).toFixed(2) })
+    return env
+  }, [skylineData, height_m])
+
   // ── Pre-build contour strands (full 360°, one-time on data/AGL change) ────
   // Uses the worker's z15-corrected ground elevation so contour angles match ridgelines.
   const contourStrands = useMemo<PrebuiltContourStrand[]>(() => {
     if (!skylineData) return []
     const viewerElev = skylineData.computedAt.groundElev + height_m
-    return buildContourStrands(skylineData, viewerElev)
-  }, [skylineData, height_m])
+    return buildContourStrands(skylineData, viewerElev, visibilityEnvelope)
+  }, [skylineData, height_m, visibilityEnvelope])
 
   // ── Pre-build fill boundaries (lowest crossing angle per-band per-azimuth) ──
   // The 0-level contour traces the coastline; this gives the fill polygon its
@@ -3328,7 +3356,6 @@ const ScanScreen: React.FC = () => {
               />
             </div>
             <span className={styles.loadingLabel}>{loadingLabel}</span>
-            <span className={styles.loadingLabel} style={{ marginTop: 4 }}>v1.0.4-MVP</span>
           </div>
         )}
 
@@ -3414,7 +3441,7 @@ const ScanScreen: React.FC = () => {
 
               return (
                 <>
-                  <div style={{ color: '#A7DDE5', marginBottom: 2 }}>v2.4 DEBUG — Silhouettes + Refined Arcs</div>
+                  <div style={{ color: '#A7DDE5', marginBottom: 2 }}>v3.0 DEBUG — Silhouettes + Refined Arcs</div>
 
                   <div style={{ color: '#68B0BF', marginTop: 3 }}>CAMERA</div>
                   <div>hdg:{heading_deg.toFixed(1)}° pit:{pitch_deg.toFixed(1)}° fov:{fov.toFixed(0)}°</div>
