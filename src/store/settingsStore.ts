@@ -49,6 +49,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showBandLines: true,            // Depth band ridgeline strokes in SCAN
   showFill: true,                 // Terrain fill below ridgelines in SCAN
   showSilhouetteLines: true,      // Silhouette edge strokes in SCAN
+  seeThroughMountains: false,     // Off = normal occlusion; on = draw contours through terrain
   contourAnimation: true,       // Slow pulse on by default
   verticalExaggeration: 4,     // 4× default — real mountains visible without being overwhelming
 
@@ -92,6 +93,7 @@ interface SettingsStore extends AppSettings {
   toggleBandLines: () => void
   toggleFill: () => void
   toggleSilhouetteLines: () => void
+  toggleSeeThroughMountains: () => void
   toggleContourAnimation: () => void
   setVerticalExaggeration: (v: VerticalExaggeration) => void
   toggleDarkMode: () => void
@@ -198,6 +200,12 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ showSilhouetteLines: next })
       },
 
+      toggleSeeThroughMountains: () => {
+        const next = !get().seeThroughMountains
+        log.info('See-through mountains toggled', { now: next })
+        set({ seeThroughMountains: next })
+      },
+
       toggleContourAnimation: () => {
         const next = !get().contourAnimation
         log.info('Contour animation toggled', { now: next })
@@ -281,7 +289,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'earthcontours-settings',      // localStorage key
-      version: 9,                          // bump when persisted shape changes
+      version: 10,                         // bump when persisted shape changes
       /**
        * Migrations:
        * v1→v2: snap old verticalExaggeration values to new set (1|2|4|10|20).
@@ -293,9 +301,13 @@ export const useSettingsStore = create<SettingsStore>()(
        * v6→v7: replace solidTerrain (unused) with showSilhouetteLines.
        * v7→v8: cap verticalExaggeration at 4× (removed 10× and 20×).
        * v8→v9: add showRoads (default false).
+       * v9→v10: add seeThroughMountains (default false).
        */
       migrate: (persisted: unknown, fromVersion: number) => {
         const state = persisted as Record<string, unknown>
+        if (fromVersion < 10) {
+          if (state.seeThroughMountains === undefined) state.seeThroughMountains = false
+        }
         if (fromVersion < 9) {
           if (state.showRoads === undefined) state.showRoads = false
         }
@@ -373,6 +385,7 @@ export const useSettingsStore = create<SettingsStore>()(
         showBandLines: state.showBandLines,
         showFill: state.showFill,
         showSilhouetteLines: state.showSilhouetteLines,
+        seeThroughMountains: state.seeThroughMountains,
         contourAnimation: state.contourAnimation,
         verticalExaggeration: state.verticalExaggeration,
         darkMode: state.darkMode,

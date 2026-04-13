@@ -225,6 +225,7 @@ export interface AppSettings {
   showBandLines: boolean
   showFill: boolean
   showSilhouetteLines: boolean
+  seeThroughMountains: boolean
   contourAnimation: boolean
   verticalExaggeration: VerticalExaggeration
 

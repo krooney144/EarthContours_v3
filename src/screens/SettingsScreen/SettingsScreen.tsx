@@ -313,6 +313,9 @@ const SettingsScreen: React.FC = () => {
           <Row label="Silhouette Lines" description="Show silhouette edge strokes in Scan view">
             <Toggle id="toggle-silhouette-lines" label="Toggle silhouette lines" checked={settings.showSilhouetteLines} onChange={settings.toggleSilhouetteLines} />
           </Row>
+          <Row label="See-through Mountains" description="Draw contour lines through terrain (disables occlusion)">
+            <Toggle id="toggle-see-through-mountains" label="Toggle see-through mountains" checked={settings.seeThroughMountains} onChange={settings.toggleSeeThroughMountains} />
+          </Row>
           <Row label="Debug Panel" description="Show diagnostics overlay on Scan screen">
             <Toggle id="toggle-debug-panel" label="Toggle debug panel" checked={settings.showDebugPanel} onChange={settings.toggleDebugPanel} />
           </Row>
