@@ -97,6 +97,10 @@ export const MAP_TILE_SUBDOMAINS = ['a', 'b', 'c', 'd'] as const
  */
 export const MAP_LABEL_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png'
 
+/** Carto dark_nolabels — road lines without text, on an opaque dark background.
+ *  Drawn with 'screen' blending to extract light road lines over DEM. */
+export const MAP_ROAD_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
+
 export const MAP_ATTRIBUTION = '© Mapzen / AWS Terrain Tiles · © OpenStreetMap · © CARTO'
 
 /** Map tile size in pixels */

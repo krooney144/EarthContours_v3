@@ -44,6 +44,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   showGlaciers: false,
   showCoastlines: true,
   showTownLabels: false,        // Off by default per briefing
+  showRoads: false,             // Roads overlay off by default
   showContourLines: true,
   showBandLines: true,            // Depth band ridgeline strokes in SCAN
   showFill: true,                 // Terrain fill below ridgelines in SCAN
@@ -86,6 +87,7 @@ interface SettingsStore extends AppSettings {
   toggleGlaciers: () => void
   toggleCoastlines: () => void
   toggleTownLabels: () => void
+  toggleRoads: () => void
   toggleContourLines: () => void
   toggleBandLines: () => void
   toggleFill: () => void
@@ -164,6 +166,12 @@ export const useSettingsStore = create<SettingsStore>()(
         const next = !get().showTownLabels
         log.info('Town labels toggled', { now: next })
         set({ showTownLabels: next })
+      },
+
+      toggleRoads: () => {
+        const next = !get().showRoads
+        log.info('Roads toggled', { now: next })
+        set({ showRoads: next })
       },
 
       toggleContourLines: () => {
@@ -273,7 +281,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'earthcontours-settings',      // localStorage key
-      version: 8,                          // bump when persisted shape changes
+      version: 9,                          // bump when persisted shape changes
       /**
        * Migrations:
        * v1→v2: snap old verticalExaggeration values to new set (1|2|4|10|20).
@@ -284,9 +292,13 @@ export const useSettingsStore = create<SettingsStore>()(
        *        making terrain invisible for existing users.
        * v6→v7: replace solidTerrain (unused) with showSilhouetteLines.
        * v7→v8: cap verticalExaggeration at 4× (removed 10× and 20×).
+       * v8→v9: add showRoads (default false).
        */
       migrate: (persisted: unknown, fromVersion: number) => {
         const state = persisted as Record<string, unknown>
+        if (fromVersion < 9) {
+          if (state.showRoads === undefined) state.showRoads = false
+        }
         if (fromVersion < 2 && typeof state.verticalExaggeration === 'number') {
           const VALID: VerticalExaggeration[] = [1, 1.5, 2, 4, 10]
           const old = state.verticalExaggeration as number
@@ -356,6 +368,7 @@ export const useSettingsStore = create<SettingsStore>()(
         showGlaciers: state.showGlaciers,
         showCoastlines: state.showCoastlines,
         showTownLabels: state.showTownLabels,
+        showRoads: state.showRoads,
         showContourLines: state.showContourLines,
         showBandLines: state.showBandLines,
         showFill: state.showFill,

@@ -31,7 +31,7 @@ import { createLogger } from '../../core/logger'
 import {
   DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM,
   MAP_MIN_ZOOM, MAP_MAX_ZOOM, TILE_SIZE,
-  MAP_LABEL_TILE_URL, MAP_TILE_SUBDOMAINS,
+  MAP_LABEL_TILE_URL, MAP_ROAD_TILE_URL, MAP_TILE_SUBDOMAINS,
 } from '../../core/constants'
 import {
   latLngToTile, tileToLatLng, latLngToPixel, pixelToLatLng,
@@ -216,6 +216,41 @@ function loadLabelTile(z: number, x: number, y: number): Promise<HTMLImageElemen
         if (firstKey) labelTileCache.delete(firstKey)
       }
       labelTileCache.set(key, img)
+      resolve(img)
+    }
+    img.onerror = reject
+    img.src = url
+  })
+}
+
+// ─── Road Tile Cache ─────────────────────────────────────────────────────────
+
+const roadTileCache = new Map<string, HTMLImageElement>()
+const ROAD_TILE_CACHE_MAX = 300
+
+function loadRoadTile(z: number, x: number, y: number): Promise<HTMLImageElement> {
+  const key = `r/${z}/${x}/${y}`
+  if (roadTileCache.has(key)) return Promise.resolve(roadTileCache.get(key)!)
+
+  const subdomain = MAP_TILE_SUBDOMAINS[(x + y) % MAP_TILE_SUBDOMAINS.length]
+  const retina    = window.devicePixelRatio >= 2 ? '@2x' : ''
+
+  const url = MAP_ROAD_TILE_URL
+    .replace('{s}', subdomain)
+    .replace('{z}', String(z))
+    .replace('{x}', String(x))
+    .replace('{y}', String(y))
+    .replace('{r}', retina)
+
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      if (roadTileCache.size >= ROAD_TILE_CACHE_MAX) {
+        const firstKey = roadTileCache.keys().next().value
+        if (firstKey) roadTileCache.delete(firstKey)
+      }
+      roadTileCache.set(key, img)
       resolve(img)
     }
     img.onerror = reject
@@ -533,7 +568,7 @@ interface MapScreenProps {
 const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
   const { activeLat, activeLng, gpsLat, gpsLng, gpsPermission, mode, setExploreLocation, switchToGPS, requestGPS } = useLocationStore()
   const { peaks, waterBodies, rivers, glaciers, coastlines, meshData, activeRegion, isCustomBounds, setWaterBodies, setRivers, setGlaciers, setCoastlines, loadCustomBounds } = useTerrainStore()
-  const { coordFormat, showPeakLabels, showLakes, showRivers: showRiversSetting, showGlaciers, showCoastlines, units, setVerticalExaggeration } = useSettingsStore()
+  const { coordFormat, showPeakLabels, showLakes, showRivers: showRiversSetting, showGlaciers, showCoastlines, showRoads, units, setVerticalExaggeration } = useSettingsStore()
   const { navigateTo } = useUIStore()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -816,7 +851,26 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     ))
     if (thisGeneration !== loadingRef.current) return
 
-    // ── Pass 2: Label overlay (towns, cities, roads) ─────────────────────────
+    // ── Pass 2: Road overlay (zoom 8+ only, screen-blended) ──────────────────
+    if (showRoads && tileZoom >= 8) {
+      ctx.globalCompositeOperation = 'screen'
+      ctx.globalAlpha = 0.4
+      await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
+        loadRoadTile(tileZoom, wrappedX, tileY)
+          .then((img) => {
+            if (thisGeneration !== loadingRef.current) return
+            ctx.drawImage(img, pixelX, pixelY, displayTileSize + 1, displayTileSize + 1)
+          })
+          .catch(() => {
+            // Road tiles are optional — silent fail
+          }),
+      ))
+      ctx.globalCompositeOperation = 'source-over'
+      ctx.globalAlpha = 1.0
+      if (thisGeneration !== loadingRef.current) return
+    }
+
+    // ── Pass 3: Label overlay (towns, cities) ───────────────────────────────
     await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
       loadLabelTile(tileZoom, wrappedX, tileY)
         .then((img) => {
@@ -1236,7 +1290,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
 
     setIsLoading(false)
     log.debug('DEM map draw complete')
-  }, [centerLat, centerLng, zoom, gpsLat, gpsLng, activeLat, activeLng, mode, peaks, showPeakLabels, waterBodies, rivers, glaciers, coastlines, showLakes, showRiversSetting, showGlaciers, showCoastlines, activeRegion, meshData, selectionStart, selectionEnd, isSelectingArea, selectionSeverity, selectionDims, units])
+  }, [centerLat, centerLng, zoom, gpsLat, gpsLng, activeLat, activeLng, mode, peaks, showPeakLabels, waterBodies, rivers, glaciers, coastlines, showLakes, showRiversSetting, showGlaciers, showCoastlines, showRoads, activeRegion, meshData, selectionStart, selectionEnd, isSelectingArea, selectionSeverity, selectionDims, units])
 
   // ── Resize observer ──────────────────────────────────────────────────────────
 
