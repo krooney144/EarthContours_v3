@@ -54,7 +54,7 @@ const MainApp: React.FC = () => {
     transitionState,
   } = useUIStore()
 
-  const { reduceMotion, darkMode } = useSettingsStore()
+  const { darkMode } = useSettingsStore()
 
   // ── Side Effects ────────────────────────────────────────────────────────────
 
@@ -67,16 +67,6 @@ const MainApp: React.FC = () => {
     })
     document.title = 'Earth Contours'
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Apply reduce-motion class to body when setting is on
-  useEffect(() => {
-    if (reduceMotion) {
-      document.body.classList.add('reduce-motion')
-      log.info('Reduce motion mode enabled')
-    } else {
-      document.body.classList.remove('reduce-motion')
-    }
-  }, [reduceMotion])
 
   // Apply dark/light theme class to root
   useEffect(() => {

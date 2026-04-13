@@ -21,27 +21,6 @@ export type TransitionState = 'idle' | 'exit' | 'black' | 'enter'
 /** Imperial uses feet/miles, metric uses meters/km */
 export type UnitSystem = 'imperial' | 'metric'
 
-/** How GPS coordinates are displayed to the user */
-export type CoordFormat = 'decimal' | 'dms' | 'utm'
-
-/** Color theme options (ocean is the primary, others future) */
-export type ColorTheme = 'ocean' | 'forest' | 'desert' | 'arctic'
-
-/** Font size for peak/river/location labels */
-export type LabelSize = 'small' | 'medium' | 'large'
-
-/** Target frame rate for the 3D renderer */
-export type TargetFPS = 'auto' | 60 | 30
-
-/** Battery/performance mode */
-export type BatteryMode = 'auto' | 'on' | 'off'
-
-/** GPS accuracy setting */
-export type GPSAccuracy = 'high' | 'medium' | 'low'
-
-/** Data resolution for terrain tiles */
-export type DataResolution = '10m' | '30m' | '90m'
-
 /**
  * Vertical exaggeration multiplier for terrain display.
  * 1× = physically correct metres (terrain looks flat for large regions — that is real).
@@ -207,49 +186,42 @@ export interface SensorData {
 
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
-/** All persisted user settings — stored in localStorage via Zustand persist */
+/**
+ * All persisted user settings — stored in localStorage via Zustand persist.
+ *
+ * Kept intentionally small: every field here is consumed somewhere in the
+ * app and has a visible effect.  Dev-only flags live under the Advanced
+ * section in SettingsScreen.
+ */
 export interface AppSettings {
-  // Units & Measurements
+  // Units
   units: UnitSystem
-  coordFormat: CoordFormat
 
-  // Map & Terrain Display
+  // Appearance (global)
+  darkMode: boolean
+
+  // Shared map/explore overlays
   showPeakLabels: boolean
+  showCoastlines: boolean
   showRivers: boolean
   showLakes: boolean
   showGlaciers: boolean
-  showCoastlines: boolean
-  showTownLabels: boolean
+
+  // Map-only overlays
   showRoads: boolean
-  showContourLines: boolean
-  showBandLines: boolean
-  showFill: boolean
-  showSilhouetteLines: boolean
-  seeThroughMountains: boolean
-  contourAnimation: boolean
+
+  // Explore
   verticalExaggeration: VerticalExaggeration
 
-  // Appearance
-  darkMode: boolean
-  colorTheme: ColorTheme
-  labelSize: LabelSize
-  reduceMotion: boolean
+  // Scan render toggles
+  showContourLines: boolean
+  showFill: boolean
+  showSilhouetteLines: boolean
 
-  // Location & Sensors
-  locationAccuracy: GPSAccuracy
-  autoDetectRegion: boolean
-
-  // Performance & Battery
-  batteryMode: BatteryMode
-  targetFPS: TargetFPS
-
-  // Debug & Developer
+  // Advanced (dev-leaning)
+  showBandLines: boolean
+  seeThroughMountains: boolean
   showDebugPanel: boolean
-
-  // Data & Downloads
-  downloadOnWifiOnly: boolean
-  dataResolution: DataResolution
-  defaultRegionId: string
 }
 
 // ─── Error Types ──────────────────────────────────────────────────────────────

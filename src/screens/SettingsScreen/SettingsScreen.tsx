@@ -1,24 +1,26 @@
 /**
  * EarthContours — SETTINGS Screen
  *
- * App configuration organized into sections:
- * 1. About (brief overview)
- * 2. Appearance (dark/light mode, label size, reduce motion)
- * 3. Units & Measurements
- * 4. Map & Terrain Display
- * 5. Location & Sensors
- * 6. Performance & Battery
- * 7. Feedback & Support
+ * Reorganized v3 layout (settings system audit):
+ *   1. About
+ *   2. Take a Tour
+ *   3. Appearance   (dark mode, units)
+ *   4. Map          (map-only + shared map/explore overlays)
+ *   5. Explore      (explore-only controls + note about shared overlays)
+ *   6. Scan         (scan render toggles)
+ *   7. Location     (GPS permission UI — always visible)
+ *   8. Advanced     (collapsible, closed on every open — dev flags)
+ *   9. Feedback & Support
  *
- * All settings persist to localStorage via the settingsStore.
- * Changes take effect immediately (reactive via Zustand).
+ * Every setting that appears here is actually consumed somewhere in the app.
+ * The audit removed 13 unused settings; see settingsStore.ts v11 migration.
  */
 
 import React, { useCallback, useState } from 'react'
 import { useSettingsStore, useLocationStore, useUIStore } from '../../store'
 import { createLogger } from '../../core/logger'
 import { submitFeedback } from '../../data/feedbackService'
-import type { VerticalExaggeration, UnitSystem, CoordFormat, TargetFPS, BatteryMode, GPSAccuracy } from '../../core/types'
+import type { UnitSystem } from '../../core/types'
 import styles from './SettingsScreen.module.css'
 
 const log = createLogger('SCREEN:SETTINGS')
@@ -90,18 +92,49 @@ const Row: React.FC<RowProps> = ({ label, description, children }) => (
 interface SectionProps {
   icon: string
   title: string
+  note?: string
   children: React.ReactNode
 }
 
-const Section: React.FC<SectionProps> = ({ icon, title, children }) => (
+const Section: React.FC<SectionProps> = ({ icon, title, note, children }) => (
   <div className={styles.section}>
     <div className={styles.sectionHeader}>
       <span className={styles.sectionIcon} aria-hidden="true">{icon}</span>
       <span className={styles.sectionTitle}>{title}</span>
     </div>
+    {note && <div className={styles.sectionNote}>{note}</div>}
     {children}
   </div>
 )
+
+/**
+ * Advanced section — collapsible, always starts collapsed on every open.
+ * State is local (useState), not persisted, so devs have to expand it each
+ * session.  Keeps experimental flags out of the way for normal users.
+ */
+interface AdvancedSectionProps {
+  children: React.ReactNode
+}
+
+const AdvancedSection: React.FC<AdvancedSectionProps> = ({ children }) => {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className={styles.section}>
+      <button
+        type="button"
+        className={styles.advancedHeader}
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls="advanced-content"
+      >
+        <span className={styles.sectionIcon} aria-hidden="true">⚙</span>
+        <span className={styles.sectionTitle}>Advanced</span>
+        <span className={`${styles.advancedChevron} ${open ? styles.advancedChevronOpen : ''}`} aria-hidden="true">▾</span>
+      </button>
+      {open && <div id="advanced-content">{children}</div>}
+    </div>
+  )
+}
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
@@ -180,8 +213,6 @@ const SettingsScreen: React.FC = () => {
     }
   }, [requestGPS])
 
-  const EXAGGERATION_OPTIONS: VerticalExaggeration[] = [1, 1.5, 2, 4, 10]
-
   return (
     <div className={styles.screen}>
       {/* Header */}
@@ -232,30 +263,6 @@ const SettingsScreen: React.FC = () => {
               onChange={settings.toggleDarkMode}
             />
           </Row>
-          <Row label="Label Size" description="Size of peak and terrain labels">
-            <Segmented<'small' | 'medium' | 'large'>
-              options={[
-                { value: 'small',  label: 'S' },
-                { value: 'medium', label: 'M' },
-                { value: 'large',  label: 'L' },
-              ]}
-              value={settings.labelSize}
-              onChange={(v) => settings.setLabelSize(v)}
-              ariaLabel="Label size"
-            />
-          </Row>
-          <Row label="Reduce Motion" description="Disable animations (accessibility)">
-            <Toggle
-              id="toggle-motion"
-              label="Toggle reduce motion"
-              checked={settings.reduceMotion}
-              onChange={settings.toggleReduceMotion}
-            />
-          </Row>
-        </Section>
-
-        {/* ── Units & Measurements ── */}
-        <Section icon="⊡" title="Units & Measurements">
           <Row label="Unit System" description="Feet and miles, or meters and km">
             <Segmented<UnitSystem>
               options={[
@@ -267,64 +274,46 @@ const SettingsScreen: React.FC = () => {
               ariaLabel="Unit system"
             />
           </Row>
-          <Row label="Coordinate Format" description="How GPS coordinates are displayed">
-            <Segmented<CoordFormat>
-              options={[
-                { value: 'decimal', label: 'Dec' },
-                { value: 'dms',     label: 'DMS' },
-                { value: 'utm',     label: 'UTM' },
-              ]}
-              value={settings.coordFormat}
-              onChange={(v) => settings.setCoordFormat(v)}
-              ariaLabel="Coordinate format"
-            />
-          </Row>
         </Section>
 
-        {/* ── Map & Terrain ── */}
-        <Section icon="◭" title="Map & Terrain">
-          <Row label="Peak Labels" description="Show mountain name labels on terrain">
-            <Toggle id="toggle-peaks" label="Toggle peak labels" checked={settings.showPeakLabels} onChange={settings.togglePeakLabels} />
-          </Row>
-          <Row label="Lakes" description="Show lakes and reservoirs on map and 3D view">
-            <Toggle id="toggle-lakes" label="Toggle lakes" checked={settings.showLakes} onChange={settings.toggleLakes} />
-          </Row>
-          <Row label="Rivers" description="Show rivers and streams on map and 3D view">
-            <Toggle id="toggle-rivers" label="Toggle rivers" checked={settings.showRivers} onChange={settings.toggleRivers} />
-          </Row>
-          <Row label="Glaciers" description="Show glaciers and ice features on map and 3D view">
-            <Toggle id="toggle-glaciers" label="Toggle glaciers" checked={settings.showGlaciers} onChange={settings.toggleGlaciers} />
-          </Row>
-          <Row label="Coastlines" description="Show coastline outlines on map">
-            <Toggle id="toggle-coastlines" label="Toggle coastlines" checked={settings.showCoastlines} onChange={settings.toggleCoastlines} />
-          </Row>
+        {/* ── Map ── */}
+        <Section
+          icon="🗺"
+          title="Map"
+          note="Overlays marked “shared” also appear on the Explore 3D view."
+        >
           <Row label="Roads" description="Show road overlay on map (zoom 8+)">
             <Toggle id="toggle-roads" label="Toggle roads" checked={settings.showRoads} onChange={settings.toggleRoads} />
           </Row>
-          <Row label="Contour Lines" description="Show elevation contour lines in Scan view">
-            <Toggle id="toggle-contours" label="Toggle contour lines" checked={settings.showContourLines} onChange={settings.toggleContourLines} />
+          <Row label="Peak Labels" description="Mountain name labels — shared with Explore and Scan">
+            <Toggle id="toggle-peaks" label="Toggle peak labels" checked={settings.showPeakLabels} onChange={settings.togglePeakLabels} />
           </Row>
-          <Row label="Scan Terrain Fill" description="Show solid terrain fill below ridgelines in Scan view">
-            <Toggle id="toggle-fill" label="Toggle terrain fill" checked={settings.showFill} onChange={settings.toggleFill} />
+          <Row label="Coastlines" description="Coastline outlines — shared with Explore">
+            <Toggle id="toggle-coastlines" label="Toggle coastlines" checked={settings.showCoastlines} onChange={settings.toggleCoastlines} />
           </Row>
-          <Row label="Band Lines" description="Show depth band ridgeline strokes in Scan view">
-            <Toggle id="toggle-band-lines" label="Toggle band lines" checked={settings.showBandLines} onChange={settings.toggleBandLines} />
+          <Row label="Rivers" description="Rivers and streams — shared with Explore">
+            <Toggle id="toggle-rivers" label="Toggle rivers" checked={settings.showRivers} onChange={settings.toggleRivers} />
           </Row>
-          <Row label="Silhouette Lines" description="Show silhouette edge strokes in Scan view">
-            <Toggle id="toggle-silhouette-lines" label="Toggle silhouette lines" checked={settings.showSilhouetteLines} onChange={settings.toggleSilhouetteLines} />
+          <Row label="Lakes" description="Lakes and reservoirs — shared with Explore">
+            <Toggle id="toggle-lakes" label="Toggle lakes" checked={settings.showLakes} onChange={settings.toggleLakes} />
           </Row>
-          <Row label="See-through Mountains" description="Draw contour lines through terrain (disables occlusion)">
-            <Toggle id="toggle-see-through-mountains" label="Toggle see-through mountains" checked={settings.seeThroughMountains} onChange={settings.toggleSeeThroughMountains} />
+          <Row label="Glaciers" description="Glaciers and ice features — shared with Explore">
+            <Toggle id="toggle-glaciers" label="Toggle glaciers" checked={settings.showGlaciers} onChange={settings.toggleGlaciers} />
           </Row>
-          <Row label="Debug Panel" description="Show diagnostics overlay on Scan screen">
-            <Toggle id="toggle-debug-panel" label="Toggle debug panel" checked={settings.showDebugPanel} onChange={settings.toggleDebugPanel} />
-          </Row>
+        </Section>
+
+        {/* ── Explore ── */}
+        <Section
+          icon="⛰"
+          title="Explore"
+          note="Overlays are shared with Map — toggle them in the Map section."
+        >
           <Row
             label="Vertical Exaggeration"
-            description="Multiply terrain heights for dramatic effect"
+            description="Multiply terrain heights in the 3D view (also adjustable inline on the Explore screen)"
           >
             <div className={styles.exagOptions}>
-              {EXAGGERATION_OPTIONS.map((v) => (
+              {([1, 1.5, 2, 4] as const).map((v) => (
                 <button
                   key={v}
                   className={`${styles.exagBtn} ${settings.verticalExaggeration === v ? styles.active : ''}`}
@@ -339,8 +328,21 @@ const SettingsScreen: React.FC = () => {
           </Row>
         </Section>
 
-        {/* ── Location & Sensors ── */}
-        <Section icon="◎" title="Location & Sensors">
+        {/* ── Scan ── */}
+        <Section icon="👁" title="Scan">
+          <Row label="Contour Lines" description="Show elevation contour lines in Scan view">
+            <Toggle id="toggle-contours" label="Toggle contour lines" checked={settings.showContourLines} onChange={settings.toggleContourLines} />
+          </Row>
+          <Row label="Terrain Fill" description="Show solid terrain fill below ridgelines">
+            <Toggle id="toggle-fill" label="Toggle terrain fill" checked={settings.showFill} onChange={settings.toggleFill} />
+          </Row>
+          <Row label="Silhouette Lines" description="Show silhouette edge strokes">
+            <Toggle id="toggle-silhouette-lines" label="Toggle silhouette lines" checked={settings.showSilhouetteLines} onChange={settings.toggleSilhouetteLines} />
+          </Row>
+        </Section>
+
+        {/* ── Location ── */}
+        <Section icon="◎" title="Location">
           <Row
             label="GPS Permission"
             description={
@@ -395,47 +397,20 @@ const SettingsScreen: React.FC = () => {
               </button>
             </div>
           )}
-          <Row label="GPS Accuracy" description="Higher accuracy uses more battery">
-            <Segmented<GPSAccuracy>
-              options={[
-                { value: 'high',   label: 'High' },
-                { value: 'medium', label: 'Med' },
-                { value: 'low',    label: 'Low' },
-              ]}
-              value={settings.locationAccuracy}
-              onChange={(v) => settings.setLocationAccuracy(v)}
-              ariaLabel="GPS accuracy"
-            />
-          </Row>
         </Section>
 
-        {/* ── Performance & Battery ── */}
-        <Section icon="⬡" title="Performance & Battery">
-          <Row label="Battery Saver" description="Reduces rendering quality to save power">
-            <Segmented<BatteryMode>
-              options={[
-                { value: 'auto', label: 'Auto' },
-                { value: 'on',   label: 'On' },
-                { value: 'off',  label: 'Off' },
-              ]}
-              value={settings.batteryMode}
-              onChange={(v) => settings.setBatteryMode(v)}
-              ariaLabel="Battery saver mode"
-            />
+        {/* ── Advanced (collapsible, closed by default every open) ── */}
+        <AdvancedSection>
+          <Row label="Band Lines" description="Depth band ridgeline strokes in Scan view (experimental)">
+            <Toggle id="toggle-band-lines" label="Toggle band lines" checked={settings.showBandLines} onChange={settings.toggleBandLines} />
           </Row>
-          <Row label="Frame Rate" description="Target render frame rate">
-            <Segmented<TargetFPS>
-              options={[
-                { value: 'auto', label: 'Auto' },
-                { value: 60,     label: '60fps' },
-                { value: 30,     label: '30fps' },
-              ]}
-              value={settings.targetFPS}
-              onChange={(v) => settings.setTargetFPS(v)}
-              ariaLabel="Target frame rate"
-            />
+          <Row label="See-through Mountains" description="Draw contour lines through terrain (disables occlusion)">
+            <Toggle id="toggle-see-through-mountains" label="Toggle see-through mountains" checked={settings.seeThroughMountains} onChange={settings.toggleSeeThroughMountains} />
           </Row>
-        </Section>
+          <Row label="Debug Panel" description="Show diagnostics overlay on Scan screen">
+            <Toggle id="toggle-debug-panel" label="Toggle debug panel" checked={settings.showDebugPanel} onChange={settings.toggleDebugPanel} />
+          </Row>
+        </AdvancedSection>
 
         {/* ── Feedback & Support ── */}
         <Section icon="✉" title="Feedback & Support">

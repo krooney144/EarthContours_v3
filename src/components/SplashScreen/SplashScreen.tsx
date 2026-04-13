@@ -10,7 +10,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
-import { useUIStore, useSettingsStore, useTerrainStore } from '../../store'
+import { useUIStore, useTerrainStore } from '../../store'
 import { createLogger } from '../../core/logger'
 import { SPLASH_DURATION_MS, DEFAULT_REGION_ID } from '../../core/constants'
 import styles from './SplashScreen.module.css'
@@ -20,7 +20,6 @@ const log = createLogger('COMPONENT:SPLASH')
 const SplashScreen: React.FC = () => {
   const setSplashComplete = useUIStore((state) => state.setSplashComplete)
   const initializeLayout = useUIStore((state) => state.initializeLayout)
-  const defaultRegionId = useSettingsStore((state) => state.defaultRegionId)
   const loadRegion = useTerrainStore((state) => state.loadRegion)
   const loadingMessage = useTerrainStore((state) => state.loadingMessage)
 
@@ -30,10 +29,9 @@ const SplashScreen: React.FC = () => {
   useEffect(() => {
     log.info('Splash screen mounted', { splashDuration: SPLASH_DURATION_MS })
 
-    // Start loading terrain data immediately while splash shows
-    const regionToLoad = defaultRegionId || DEFAULT_REGION_ID
-    log.info('Starting background terrain load', { region: regionToLoad })
-    loadRegion(regionToLoad).catch((err) => {
+    // Start loading the default region in the background while the splash shows
+    log.info('Starting background terrain load', { region: DEFAULT_REGION_ID })
+    loadRegion(DEFAULT_REGION_ID).catch((err) => {
       log.error('Background terrain load failed', err)
       // Non-fatal — app will continue, terrain will show error state
     })

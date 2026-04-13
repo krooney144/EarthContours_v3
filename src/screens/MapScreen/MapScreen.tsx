@@ -568,7 +568,7 @@ interface MapScreenProps {
 const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
   const { activeLat, activeLng, gpsLat, gpsLng, gpsPermission, mode, setExploreLocation, switchToGPS, requestGPS } = useLocationStore()
   const { peaks, waterBodies, rivers, glaciers, coastlines, meshData, activeRegion, isCustomBounds, setWaterBodies, setRivers, setGlaciers, setCoastlines, loadCustomBounds } = useTerrainStore()
-  const { coordFormat, showPeakLabels, showLakes, showRivers: showRiversSetting, showGlaciers, showCoastlines, showRoads, units, setVerticalExaggeration } = useSettingsStore()
+  const { showPeakLabels, showLakes, showRivers: showRiversSetting, showGlaciers, showCoastlines, showRoads, units, setVerticalExaggeration } = useSettingsStore()
   const { navigateTo } = useUIStore()
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -2574,7 +2574,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
       {/* Coordinate bar */}
       <div className={styles.coordBar} aria-label="Map coordinates">
         <span className={styles.coordText}>
-          {formatCoordinates(cursorLat, cursorLng, coordFormat)}
+          {formatCoordinates(cursorLat, cursorLng, 'decimal')}
         </span>
         <span className={styles.zoomText}>Z{Math.round(zoom)}</span>
       </div>

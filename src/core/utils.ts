@@ -6,8 +6,15 @@
  * These are easy to test and reason about.
  */
 
-import type { UnitSystem, CoordFormat, LatLng, TileCoord } from './types'
+import type { UnitSystem, LatLng, TileCoord } from './types'
 import { TILE_SIZE } from './constants'
+
+/**
+ * Coordinate display format.  Kept here (not in shared types) since the
+ * settings-level `coordFormat` was removed in the v3 audit — only this
+ * utility still knows about DMS/UTM, callers currently always pass 'decimal'.
+ */
+export type CoordFormat = 'decimal' | 'dms' | 'utm'
 
 // ─── Unit Conversion ──────────────────────────────────────────────────────────
 
