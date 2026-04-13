@@ -1108,20 +1108,20 @@ function buildFillBoundaries(
         const end = offsets[ai + 1]
         if (start === end) continue  // no crossings at this azimuth
 
-        // Find the lowest-elevation crossing (closest to sea level = coastline)
-        let minElev = Infinity
-        let minDist = 0
+        // Look for a 0-level crossing (the coastline). Only this crossing defines
+        // the fill bottom. Higher-level crossings are interior contour lines, not
+        // terrain boundaries. If no 0-level crossing exists at this azimuth, the
+        // sentinel remains — the fill falls back to canvas bottom (inland terrain).
         for (let j = start; j < end; j += 5) {
           const elev = data[j]
-          if (elev < minElev) {
-            minElev = elev
-            minDist = data[j + 1]
+          if (elev <= 0.5) {  // 0-level crossing (tolerance for float rounding)
+            const dist = data[j + 1]
+            if (dist > 0) {
+              const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+              angles[ai] = Math.atan2(elev - curvDrop - viewerElev, dist)
+            }
+            break  // found coastline, stop
           }
-        }
-
-        if (minElev < Infinity && minDist > 0) {
-          const curvDrop = (minDist * minDist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-          angles[ai] = Math.atan2(minElev - curvDrop - viewerElev, minDist)
         }
       }
     }
