@@ -1076,71 +1076,65 @@ function buildContourStrands(
 
 // ─── Coastline Fill Boundary ──────────────────────────────────────────────────
 //
-// Builds a SINGLE unified fill boundary across all bands.
-// Scans every band's crossing data for 0-level crossings (the coastline).
-// At each azimuth, the 0-level crossing from whichever band has one becomes
-// the fill bottom. Runs once when skyline data or AGL changes — NOT per frame.
+// Precomputes the lowest contour crossing angle per-band per-azimuth.
+// The 0-level contour (sea level) traces the coastline. This gives the fill
+// polygon its bottom boundary: fill from ridgeline down to this angle.
+// Runs once when skyline data or AGL changes — NOT per frame.
 
-/** Unified fill boundary — one per-azimuth coastline angle (not per-band). */
+/** Per-band array of lowest crossing elevation angles (fill bottom boundary). */
 interface FillBoundary {
-  /** Per-azimuth coastline angle (radians). -PI/2 sentinel = no coastline (inland). */
+  /** Per-azimuth lowest crossing angle (radians). -PI/2 sentinel = no crossings (ocean). */
   angles: Float32Array
   resolution: number
   numAzimuths: number
 }
 
-function buildFillBoundary(
+function buildFillBoundaries(
   skyline: SkylineData,
   viewerElev: number,
-): FillBoundary {
-  const { resolution, numAzimuths } = skyline
-  const angles = new Float32Array(numAzimuths).fill(-Math.PI / 2)  // sentinel = inland
+): FillBoundary[] {
+  const boundaries: FillBoundary[] = []
 
-  // Scan ALL bands for 0-level crossings at each azimuth.
-  // Different bands have different resolutions, so we map each band's azimuth
-  // to the overall resolution and keep the best (highest screen Y = most negative angle).
   for (let bi = 0; bi < skyline.bands.length; bi++) {
     const band = skyline.bands[bi]
+    const bandAz = band.numAzimuths
     const offsets = band.crossingOffsets
     const data = band.crossingData
-    if (!data || data.length === 0) continue
+    const angles = new Float32Array(bandAz).fill(-Math.PI / 2)  // sentinel = no crossings
 
-    const bandAz = band.numAzimuths
-    const bandRes = band.resolution
+    if (data && data.length > 0) {
+      for (let ai = 0; ai < bandAz; ai++) {
+        const start = offsets[ai]
+        const end = offsets[ai + 1]
+        if (start === end) continue  // no crossings at this azimuth
 
-    for (let bai = 0; bai < bandAz; bai++) {
-      const start = offsets[bai]
-      const end = offsets[bai + 1]
-      if (start === end) continue
-
-      // Find 0-level crossing in this band at this azimuth
-      for (let j = start; j < end; j += 5) {
-        const elev = data[j]
-        if (elev <= 0.5) {  // 0-level crossing (coastline)
-          const dist = data[j + 1]
-          if (dist > 0) {
-            const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-            const angle = Math.atan2(elev - curvDrop - viewerElev, dist)
-
-            // Map this band azimuth to the overall azimuth index
-            const overallIdx = Math.round((bai / bandRes) * resolution) % numAzimuths
-            // Keep the LOWEST angle (deepest below horizon = closest coast to viewer)
-            if (angle < angles[overallIdx] || angles[overallIdx] <= -Math.PI / 2 + 0.001) {
-              angles[overallIdx] = angle
-            }
+        // Find the lowest-elevation crossing (closest to sea level = coastline)
+        let minElev = Infinity
+        let minDist = 0
+        for (let j = start; j < end; j += 5) {
+          const elev = data[j]
+          if (elev < minElev) {
+            minElev = elev
+            minDist = data[j + 1]
           }
-          break
+        }
+
+        if (minElev < Infinity && minDist > 0) {
+          const curvDrop = (minDist * minDist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+          angles[ai] = Math.atan2(minElev - curvDrop - viewerElev, minDist)
         }
       }
     }
+
+    boundaries.push({ angles, resolution: band.resolution, numAzimuths: bandAz })
   }
 
-  return { angles, resolution, numAzimuths }
+  return boundaries
 }
 
-/** Look up the fill bottom angle at a fractional bearing.
+/** Look up the fill bottom angle at a fractional bearing for a given band.
  *  Linearly interpolates between adjacent azimuth samples.
- *  Returns -PI/2 if no coastline at this azimuth (inland — fill to canvas bottom). */
+ *  Returns -PI/2 if no crossings at this azimuth (ocean — no fill). */
 function fillBoundaryAngleAt(
   boundary: FillBoundary,
   bearingDeg: number,
@@ -1155,7 +1149,9 @@ function fillBoundaryAngleAt(
   const a0 = boundary.angles[idx0]
   const a1 = boundary.angles[idx1]
 
+  // Both ocean → no fill
   if (a0 <= SENTINEL && a1 <= SENTINEL) return -Math.PI / 2
+  // One ocean → use the other (avoids hard edge between land/ocean azimuths)
   if (a0 <= SENTINEL) return a1
   if (a1 <= SENTINEL) return a0
   return a0 * (1 - t) + a1 * t
@@ -1799,7 +1795,7 @@ function renderTerrain(
   silResolution: number = 0,
   silElevMin: number = 0,
   silElevMax: number = 0,
-  fillBound: FillBoundary | null = null,
+  fillBounds: FillBoundary[] = [],
 ): void {
   const { W, H } = cam
   const numBands = skyline.bands.length
@@ -1822,18 +1818,35 @@ function renderTerrain(
   // far bands use long segments to avoid dotty appearance from stroke gaps
   const SEGMENT_SIZES = [3, 4, 6, 12, 24, 48]  // ultra-near → far
 
-  // ── Single unified fill polygon ─────────────────────────────────────────────
-  // One fill polygon using the overall skyline (max angle across ALL bands at
-  // each azimuth). This IS the actual terrain silhouette — not a per-band
-  // ridgeline artifact. Bottom = 0-level coastline crossing or canvas bottom.
-  if (showFill) {
-    const topY    = new Float32Array(W)
+  // Silhouette pre-bucketing removed — with unified flat terrain fill,
+  // band fill polygons provide full coverage. Silhouette layer fills are
+  // no longer needed (were the largest per-frame cost).
+
+  // Draw bands far→near (painter's order: far gets painted first, near overlaps)
+  // Reverse iteration: DEPTH_BANDS[0]=near, [1]=mid, [2]=far → draw [2],[1],[0]
+  for (let bi = numBands - 1; bi >= 0; bi--) {
+    const style = bandStyleForIndex(bi, numBands, darkMode)
+    const bandCfg = DEPTH_BANDS[bi]
+    const segSize = SEGMENT_SIZES[bi] ?? 24
+
+    // Line width interpolation helper
+    const lwMin = bandCfg ? bandCfg.minDist : 0
+    const lwMax = bandCfg ? bandCfg.maxDist : 1
+    const lwRange = lwMax - lwMin
+
+    // ── Fill between ridgeline and lowest contour (coastline) ───────────────
+    // Top boundary = band ridgeline (max elevation angle per azimuth).
+    // Bottom boundary = lowest contour crossing angle (from fillBoundaries).
+    // The 0-level contour traces the coastline, so fill naturally stops at the
+    // water line. Where no crossings exist (ocean), no fill is drawn.
+    const hasFillBound = fillBounds.length > bi
     const bottomY = new Float32Array(W)
-    let anyFill = false
+    const topY    = new Float32Array(W)
+    let hasVisiblePixels = false
 
     for (let col = 0; col < W; col++) {
       const bearingDeg = cam.heading_deg + (col / W - 0.5) * cam.hfov
-      const angle = skylineAngleAt(skyline, bearingDeg, projected)
+      const angle = bandAngleAt(skyline, bi, bearingDeg, projected)
 
       if (angle <= -Math.PI / 2 + 0.001) {
         topY[col] = H
@@ -1844,11 +1857,14 @@ function renderTerrain(
       const { y } = project(bearingDeg, angle, cam)
       topY[col] = Math.min(H, Math.max(0, Math.round(y)))
 
-      // Bottom = 0-level coastline crossing when available, canvas bottom otherwise
-      if (fillBound) {
-        const boundAngle = fillBoundaryAngleAt(fillBound, bearingDeg)
+      // Bottom = lowest contour crossing (coastline) when available.
+      // When no crossings exist at this azimuth, fill to canvas bottom (inland fallback).
+      // The ridgeline sentinel check above already handles pure ocean (elevation ≤ 0).
+      if (hasFillBound) {
+        const boundAngle = fillBoundaryAngleAt(fillBounds[bi], bearingDeg)
         if (boundAngle <= -Math.PI / 2 + 0.001) {
-          bottomY[col] = H  // No coastline — inland, fill to bottom
+          // No crossings — inland terrain between contour levels, fill to bottom
+          bottomY[col] = H
         } else {
           const { y: by } = project(bearingDeg, boundAngle, cam)
           bottomY[col] = Math.min(H, Math.max(0, Math.round(by)))
@@ -1857,10 +1873,10 @@ function renderTerrain(
         bottomY[col] = H
       }
 
-      anyFill = true
+      hasVisiblePixels = true
     }
 
-    if (anyFill) {
+    if (hasVisiblePixels && showFill) {
       ctx.beginPath()
       ctx.moveTo(0, bottomY[0])
       for (let col = 0; col < W; col++) {
@@ -1873,22 +1889,8 @@ function renderTerrain(
       ctx.fillStyle = darkMode ? TERRAIN_FILL_DARK : TERRAIN_FILL_LIGHT
       ctx.fill()
     }
-  }
 
-  // Draw bands far→near (painter's order: far gets painted first, near overlaps)
-  for (let bi = numBands - 1; bi >= 0; bi--) {
-    const style = bandStyleForIndex(bi, numBands, darkMode)
-    const bandCfg = DEPTH_BANDS[bi]
-    const segSize = SEGMENT_SIZES[bi] ?? 24
-
-    // Line width interpolation helper
-    const lwMin = bandCfg ? bandCfg.minDist : 0
-    const lwMax = bandCfg ? bandCfg.maxDist : 1
-    const lwRange = lwMax - lwMin
-
-    const hasVisiblePixels = true  // contours/strokes check their own visibility
-
-    // ── Contour lines for THIS band ─────
+    // ── Contour lines for THIS band (drawn between fill and stroke) ─────
     // Contours sit on top of their own band's silhouette fill but below the
     // next nearer band's silhouette fill. Painter's order handles occlusion
     // automatically — nearer band fills cover farther contours.
@@ -2334,7 +2336,7 @@ function drawScanCanvas(
   projectedArcs: ProjectedRefinedArc[] | null,
   silhouetteLayers: SilhouetteLayer[][] | null,
   projectedNearProfile: ProjectedNearProfile | null,
-  fillBound: FillBoundary | null = null,
+  fillBoundaries: FillBoundary[] = [],
   showBandLines: boolean = true,
   showFill: boolean = true,
   showPeakLabels: boolean = true,
@@ -2427,7 +2429,7 @@ function drawScanCanvas(
     renderTerrain(ctx, skylineData, cam, projectedBands, showBandLines, showFill,
       contourStrands, showContourLines, darkMode,
       silhouetteLayers, silRes, silElevMin, silElevMax,
-      fillBound)
+      fillBoundaries)
   }
 
   // ── 2b. Silhouette glow + edge strokes ──────────────────────────────────
@@ -2674,12 +2676,13 @@ const ScanScreen: React.FC = () => {
     return buildContourStrands(skylineData, viewerElev)
   }, [skylineData, height_m])
 
-  // ── Pre-build fill boundary (0-level coastline angle, unified across bands) ──
-  // Scans all bands for 0-level crossings to find the coastline at each azimuth.
-  const fillBoundary = useMemo<FillBoundary | null>(() => {
-    if (!skylineData) return null
+  // ── Pre-build fill boundaries (lowest crossing angle per-band per-azimuth) ──
+  // The 0-level contour traces the coastline; this gives the fill polygon its
+  // bottom boundary so terrain fill stops at the coast instead of canvas bottom.
+  const fillBoundaries = useMemo<FillBoundary[]>(() => {
+    if (!skylineData) return []
     const viewerElev = skylineData.computedAt.groundElev + height_m
-    return buildFillBoundary(skylineData, viewerElev)
+    return buildFillBoundaries(skylineData, viewerElev)
   }, [skylineData, height_m])
 
   // ── Re-project refined arc angles when AGL changes ─────────────────────────
@@ -3057,7 +3060,7 @@ const ScanScreen: React.FC = () => {
       contourStrands, projectedArcs,
       silhouetteLayers,
       projectedNearProfile,
-      fillBoundary,
+      fillBoundaries,
       showBandLines, showFill, showPeakLabels,
       showContourLines, showSilhouetteLines, darkMode,
     )
