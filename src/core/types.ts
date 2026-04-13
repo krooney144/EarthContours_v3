@@ -610,6 +610,14 @@ export interface SkylineData {
    *  the ridgeline, not the full terrain surface shape.
    *  Null if near-field profile was not computed (e.g. very old worker). */
   nearProfile: NearFieldProfile | null
+  /** Per-azimuth coast (water/land) transitions detected during ray march.
+   *  Packed [dist, toLand, dist, toLand, ...] where toLand: 1.0 = water→land, 0.0 = land→water.
+   *  Used by the SCAN renderer to clip terrain fill at coastlines instead of filling to canvas bottom. */
+  coastData: Float32Array
+  /** Per-azimuth offset into coastData (length = numAzimuths + 1).
+   *  Azimuth ai's transitions are at indices coastOffsets[ai]..coastOffsets[ai+1].
+   *  Each transition occupies 2 floats: [distance_m, toLand]. */
+  coastOffsets: Uint32Array
   /** Steps per degree — 2 means 0.5°/step (720 azimuths) */
   resolution:  number
   /** Total azimuth steps = 360 × resolution */
