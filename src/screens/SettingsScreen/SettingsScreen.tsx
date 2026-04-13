@@ -298,6 +298,9 @@ const SettingsScreen: React.FC = () => {
           <Row label="Coastlines" description="Show coastline outlines on map">
             <Toggle id="toggle-coastlines" label="Toggle coastlines" checked={settings.showCoastlines} onChange={settings.toggleCoastlines} />
           </Row>
+          <Row label="Roads" description="Show road overlay on map (zoom 8+)">
+            <Toggle id="toggle-roads" label="Toggle roads" checked={settings.showRoads} onChange={settings.toggleRoads} />
+          </Row>
           <Row label="Contour Lines" description="Show elevation contour lines in Scan view">
             <Toggle id="toggle-contours" label="Toggle contour lines" checked={settings.showContourLines} onChange={settings.toggleContourLines} />
           </Row>

@@ -220,6 +220,7 @@ export interface AppSettings {
   showGlaciers: boolean
   showCoastlines: boolean
   showTownLabels: boolean
+  showRoads: boolean
   showContourLines: boolean
   showBandLines: boolean
   showFill: boolean
