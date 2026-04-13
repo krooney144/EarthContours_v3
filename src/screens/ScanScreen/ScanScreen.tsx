@@ -1857,17 +1857,18 @@ function renderTerrain(
       const { y } = project(bearingDeg, angle, cam)
       topY[col] = Math.min(H, Math.max(0, Math.round(y)))
 
-      // Bottom = lowest contour crossing (coastline). If no crossings → no fill.
+      // Bottom = lowest contour crossing (coastline) when available.
+      // When no crossings exist at this azimuth, fill to canvas bottom (inland fallback).
+      // The ridgeline sentinel check above already handles pure ocean (elevation ≤ 0).
       if (hasFillBound) {
         const boundAngle = fillBoundaryAngleAt(fillBounds[bi], bearingDeg)
         if (boundAngle <= -Math.PI / 2 + 0.001) {
-          // No crossings at this azimuth — ocean, skip fill for this column
-          topY[col] = H
+          // No crossings — inland terrain between contour levels, fill to bottom
           bottomY[col] = H
-          continue
+        } else {
+          const { y: by } = project(bearingDeg, boundAngle, cam)
+          bottomY[col] = Math.min(H, Math.max(0, Math.round(by)))
         }
-        const { y: by } = project(bearingDeg, boundAngle, cam)
-        bottomY[col] = Math.min(H, Math.max(0, Math.round(by)))
       } else {
         bottomY[col] = H
       }
