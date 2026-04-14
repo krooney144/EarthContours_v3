@@ -76,6 +76,15 @@ const REFRACTION_K      = 0.13       // Atmospheric refraction coefficient
 const DEG_TO_RAD        = Math.PI / 180
 const SKYLINE_RESOLUTION = 4         // 0.25° per step = 1440 azimuths for full 360°
 
+// ─── Near-peak occlusion tolerance ───────────────────────────────────────────
+// For peaks within NEAR_PEAK_TOL_MAX_M, allow the peak to be up to
+// NEAR_PEAK_TOL_DEG below the envelope's max angle and still count as visible.
+// Handles self-occlusion on convex mountain profiles (false-summit geometry)
+// plus DEM/OSM elevation-source mismatch that dominates at close range.
+const NEAR_PEAK_TOL_DEG    = 3
+const NEAR_PEAK_TOL_MAX_M  = 3_000
+const NEAR_PEAK_TOL_RATIO  = Math.tan(NEAR_PEAK_TOL_DEG * DEG_TO_RAD)
+
 // ─── Unified Terrain Fill ─────────────────────────────────────────────────────
 // Single flat base color for ALL terrain surfaces (band fills, silhouette fills,
 // near-field occlusion). Contour/ridgeline strokes sit on top with elevation-based
@@ -1415,7 +1424,14 @@ function isPeakVisible(
   if (si < 0) return true  // peak closer than first profile step — show it
 
   const maxRatio = envelope.envelope[envAi * envelope.numSteps + si]
-  return peakRatio >= maxRatio
+
+  // Near-peak tolerance: within NEAR_PEAK_TOL_MAX_M, allow the peak to sit up
+  // to NEAR_PEAK_TOL_DEG below the envelope. Covers false-summit self-occlusion
+  // on convex mountain profiles and DEM/OSM elevation-source mismatch which
+  // both produce apparent occlusion at close range that the viewer doesn't
+  // actually experience.
+  const tol = dist < NEAR_PEAK_TOL_MAX_M ? NEAR_PEAK_TOL_RATIO : 0
+  return peakRatio >= maxRatio - tol
 }
 
 // ─── Quick Render (SkylineData) ───────────────────────────────────────────────
