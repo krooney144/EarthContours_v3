@@ -76,6 +76,15 @@ const REFRACTION_K      = 0.13       // Atmospheric refraction coefficient
 const DEG_TO_RAD        = Math.PI / 180
 const SKYLINE_RESOLUTION = 4         // 0.25° per step = 1440 azimuths for full 360°
 
+// ─── Near-peak occlusion tolerance ───────────────────────────────────────────
+// For peaks within NEAR_PEAK_TOL_MAX_M, allow the peak to be up to
+// NEAR_PEAK_TOL_DEG below the envelope's max angle and still count as visible.
+// Handles self-occlusion on convex mountain profiles (false-summit geometry)
+// plus DEM/OSM elevation-source mismatch that dominates at close range.
+const NEAR_PEAK_TOL_DEG    = 3
+const NEAR_PEAK_TOL_MAX_M  = 3_000
+const NEAR_PEAK_TOL_RATIO  = Math.tan(NEAR_PEAK_TOL_DEG * DEG_TO_RAD)
+
 // ─── Unified Terrain Fill ─────────────────────────────────────────────────────
 // Single flat base color for ALL terrain surfaces (band fills, silhouette fills,
 // near-field occlusion). Contour/ridgeline strokes sit on top with elevation-based
@@ -1415,6 +1424,9 @@ function isPeakVisible(
   if (si < 0) return true  // peak closer than first profile step — show it
 
   const maxRatio = envelope.envelope[envAi * envelope.numSteps + si]
+  if (dist <= NEAR_PEAK_TOL_MAX_M) {
+    return peakRatio + NEAR_PEAK_TOL_RATIO >= maxRatio
+  }
   return peakRatio >= maxRatio
 }
 
@@ -1541,32 +1553,6 @@ function bandDistAt(
   return d0 * (1 - t) + d1 * t
 }
 
-/** Interpolated GPS coords of the ridgeline point at a fractional bearing for a given band.
- *  Returns null if no ridge at this azimuth. */
-function bandGpsAt(
-  skyline: SkylineData,
-  bandIndex: number,
-  bearingDeg: number,
-): { lat: number; lng: number } | null {
-  const band = skyline.bands[bandIndex]
-  const bandRes = band.resolution
-  const bandAz  = band.numAzimuths
-
-  const normBearing = ((bearingDeg % 360) + 360) % 360
-  const fracIdx = normBearing * bandRes
-  const idx0 = Math.floor(fracIdx) % bandAz
-  const idx1 = (idx0 + 1) % bandAz
-  const t = fracIdx - Math.floor(fracIdx)
-
-  if (band.elevations[idx0] === -Infinity && band.elevations[idx1] === -Infinity) return null
-  if (band.elevations[idx0] === -Infinity) return { lat: band.ridgeLats[idx1], lng: band.ridgeLngs[idx1] }
-  if (band.elevations[idx1] === -Infinity) return { lat: band.ridgeLats[idx0], lng: band.ridgeLngs[idx0] }
-
-  return {
-    lat: band.ridgeLats[idx0] * (1 - t) + band.ridgeLats[idx1] * t,
-    lng: band.ridgeLngs[idx0] * (1 - t) + band.ridgeLngs[idx1] * t,
-  }
-}
 
 /** GPS proximity radius (metres) per depth band — peaks must own the ridgeline within this radius.
  *  Near terrain has tight radius (ridge points are close together),
@@ -2044,9 +2030,6 @@ const PEAK_ARC_HALF_FAR  = 5    // ±5° for peaks ≥ 10 km
 const PEAK_ARC_HALF_NEAR = 10   // ±10° for peaks < 10 km (linearly interpolated)
 const PEAK_ARC_NEAR_DIST = 10_000  // Distance (m) below which arc widens
 
-/** Bearing step size for sampling the ridgeline within the arc (degrees). */
-const PEAK_ARC_STEP = 0.25
-
 /** Flat-earth distance² between two GPS points (metres²). Fast approximation valid within ~300km. */
 function gpsDistSq(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const dy = (lat2 - lat1) * 111_132
@@ -2240,98 +2223,10 @@ function renderPeakRidgelines(
         }
       }
       if (pathStarted) ctx.stroke()
-
-    } else {
-      // ── Fallback: render using band data (original path) ──────────────────
-      const totalSteps = Math.ceil(arcHalf * 2 / PEAK_ARC_STEP)
-      const BATCH_SIZE = 6
-      let segCount = 0
-      let pathStarted = false
-
-      for (let s = 0; s <= totalSteps; s++) {
-        const bearingOffset = -arcHalf + (s / (totalSteps || 1)) * arcHalf * 2
-        const bearing = peakBearing + bearingOffset
-
-        // GPS proximity check: does the peak own the ridgeline at this azimuth?
-        const ridgeGps = bandGpsAt(skyline, bestBand, bearing)
-        if (!ridgeGps || gpsDistSq(pos.lat, pos.lng, ridgeGps.lat, ridgeGps.lng) > gpsRadiusSq) {
-          if (pathStarted) ctx.stroke()
-          pathStarted = false
-          segCount = 0
-          continue
-        }
-
-        const angle = bandAngleAt(skyline, bestBand, bearing, projected)
-        if (angle <= -Math.PI / 2 + 0.001) {
-          if (pathStarted) ctx.stroke()
-          pathStarted = false
-          segCount = 0
-          continue
-        }
-
-        const { x, y } = project(bearing, angle, cam)
-        if (x < -50 || x > W + 50 || y < 0 || y > H) {
-          if (pathStarted) ctx.stroke()
-          pathStarted = false
-          segCount = 0
-          continue
-        }
-
-        // Edge fade: alpha falls off smoothly toward arc edges (cosine curve)
-        const edgeT = Math.abs(bearingOffset) / arcHalf  // 0 at center, 1 at edge
-        const edgeFade = Math.cos(edgeT * Math.PI * 0.5) // 1 at center, 0 at edge
-        const alpha = baseAlpha * edgeFade
-        if (alpha < 0.01) {
-          if (pathStarted) ctx.stroke()
-          pathStarted = false
-          segCount = 0
-          continue
-        }
-
-        if (!pathStarted) {
-          const elev = bandElevAt(skyline, bestBand, bearing)
-          const tElev = hasElevRange && elev > -Infinity
-            ? (elev - globalElevMin) / elevRange : 0.5
-          const color = elevToRidgeColor(tElev)
-          const rgbMatch = color.match(/\d+/g)
-          if (!rgbMatch) continue
-          const r = parseInt(rgbMatch[0]), g = parseInt(rgbMatch[1]), b = parseInt(rgbMatch[2])
-          const cr = Math.round(r + (255 - r) * 0.15)
-          const cg = Math.round(g + (255 - g) * 0.15)
-          const cb = Math.round(b + (255 - b) * 0.15)
-
-          ctx.beginPath()
-          ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(3)})`
-          ctx.moveTo(x, y)
-          pathStarted = true
-          segCount = 0
-        } else if (segCount >= BATCH_SIZE) {
-          ctx.lineTo(x, y)
-          ctx.stroke()
-
-          const elev = bandElevAt(skyline, bestBand, bearing)
-          const tElev = hasElevRange && elev > -Infinity
-            ? (elev - globalElevMin) / elevRange : 0.5
-          const color = elevToRidgeColor(tElev)
-          const rgbMatch = color.match(/\d+/g)
-          if (!rgbMatch) { pathStarted = false; segCount = 0; continue }
-          const r = parseInt(rgbMatch[0]), g = parseInt(rgbMatch[1]), b = parseInt(rgbMatch[2])
-          const cr = Math.round(r + (255 - r) * 0.15)
-          const cg = Math.round(g + (255 - g) * 0.15)
-          const cb = Math.round(b + (255 - b) * 0.15)
-
-          ctx.beginPath()
-          ctx.strokeStyle = `rgba(${cr},${cg},${cb},${alpha.toFixed(3)})`
-          ctx.moveTo(x, y)
-          segCount = 0
-        } else {
-          ctx.lineTo(x, y)
-          segCount++
-        }
-      }
-
-      if (pathStarted) ctx.stroke()
     }
+    // No fallback: peaks without a refined arc (including <25 km, or far peaks
+    // still awaiting refinement) render label + dot only. The silhouette/contour
+    // layers already draw the ridgeline itself.
   }
 
   ctx.restore()
@@ -2694,6 +2589,9 @@ const ScanScreen: React.FC = () => {
   const [refinedArcs, setRefinedArcs] = useState<RefinedArc[]>([])
   // Refinement progress: null = not refining, string = status message
   const [refineStatus, setRefineStatus] = useState<string | null>(null)
+  // OSM peak fetch in flight — used to show a "Loading peaks…" pill so the
+  // user knows more peaks are still arriving while the terrain is already drawn.
+  const [peaksLoading, setPeaksLoading] = useState(false)
 
   // ── Gyroscope mode ──────────────────────────────────────────────────────
   // When active, DeviceOrientationEvent drives heading + pitch.
@@ -2905,6 +2803,7 @@ const ScanScreen: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false
+    setPeaksLoading(true)
     fetchPeaksNear(activeLat, activeLng, 400)
       .then(fetched => {
         if (!cancelled) {
@@ -2913,6 +2812,7 @@ const ScanScreen: React.FC = () => {
         }
       })
       .catch(err => log.warn('OSM peak fetch failed', { err: String(err) }))
+      .finally(() => { if (!cancelled) setPeaksLoading(false) })
     return () => { cancelled = true }
   }, [activeLat, activeLng])
 
@@ -3403,8 +3303,9 @@ const ScanScreen: React.FC = () => {
           </div>
         )}
 
-        {/* Refinement progress indicator — shown while second-pass peak refinement runs */}
-        {refineStatus && !isLoading && (
+        {/* Peak status pill — OSM fetch → refinement progress. Hidden during the
+            big skyline loading overlay to avoid double indicators. */}
+        {!isLoading && (refineStatus || peaksLoading) && (
           <div style={{
             position: 'absolute', bottom: 70, left: '50%', transform: 'translateX(-50%)',
             color: 'rgba(104, 176, 191, 0.85)', fontSize: 11, fontFamily: 'monospace',
@@ -3412,7 +3313,7 @@ const ScanScreen: React.FC = () => {
             borderRadius: 10, zIndex: 100, whiteSpace: 'nowrap',
             pointerEvents: 'none',
           }}>
-            {refineStatus}
+            {refineStatus ?? 'Loading peaks…'}
           </div>
         )}
 
