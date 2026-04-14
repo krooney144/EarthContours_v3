@@ -222,6 +222,14 @@ export interface AppSettings {
   showBandLines: boolean
   seeThroughMountains: boolean
   showDebugPanel: boolean
+
+  // First-visit tutorial hint — per-screen flag, persisted so the small
+  // "tap for a quick guide" prompt only shows once per screen on this device.
+  tutorialSeen: {
+    map: boolean
+    scan: boolean
+    explore: boolean
+  }
 }
 
 // ─── Error Types ──────────────────────────────────────────────────────────────

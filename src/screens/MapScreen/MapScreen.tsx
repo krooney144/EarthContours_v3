@@ -41,6 +41,7 @@ import { loadElevationTile } from '../../data/elevationLoader'
 import { loadNaturalEarthRivers, loadNaturalEarthLakes, loadNaturalEarthGlaciers, loadNaturalEarthCoastlines } from '../../data/geoManager'
 import type { TileCoord } from '../../core/types'
 import { TutorialOverlay } from '../../components/TutorialOverlay/TutorialOverlay'
+import { TutorialHint } from '../../components/TutorialHint/TutorialHint'
 import styles from './MapScreen.module.css'
 
 const log = createLogger('SCREEN:MAP')
@@ -2582,7 +2583,8 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
       {/* End of non-exhibit chrome */}
       </>)}
 
-      {/* Tutorial overlay */}
+      {/* Tutorial overlay + first-visit hint */}
+      <TutorialHint screen="map" />
       <TutorialOverlay screen="map" />
     </div>
   )

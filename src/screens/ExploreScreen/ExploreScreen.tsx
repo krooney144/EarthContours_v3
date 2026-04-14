@@ -27,6 +27,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavigateHint } from '../../components/NavigateHint/NavigateHint'
 import { TutorialOverlay } from '../../components/TutorialOverlay/TutorialOverlay'
+import { TutorialHint } from '../../components/TutorialHint/TutorialHint'
 import {
   useCameraStore, useTerrainStore, useSettingsStore, useLocationStore, useUIStore,
 } from '../../store'
@@ -703,7 +704,8 @@ const ExploreScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Tutorial overlay */}
+      {/* Tutorial overlay + first-visit hint */}
+      <TutorialHint screen="explore" />
       <TutorialOverlay screen="explore" />
     </div>
   )

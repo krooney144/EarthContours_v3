@@ -48,6 +48,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   showBandLines: false,
   seeThroughMountains: false,
   showDebugPanel: false,
+
+  // First-visit tutorial hint — all false until user visits each screen
+  tutorialSeen: { map: false, scan: false, explore: false },
 }
 
 // ─── Store Interface ──────────────────────────────────────────────────────────
@@ -68,6 +71,7 @@ interface SettingsStore extends AppSettings {
   toggleBandLines: () => void
   toggleSeeThroughMountains: () => void
   toggleDebugPanel: () => void
+  markTutorialSeen: (screen: 'map' | 'scan' | 'explore') => void
   resetToDefaults: () => void
 }
 
@@ -183,6 +187,13 @@ export const useSettingsStore = create<SettingsStore>()(
         set({ showDebugPanel: next })
       },
 
+      markTutorialSeen: (screen) => {
+        const current = get().tutorialSeen
+        if (current[screen]) return
+        log.info('Tutorial hint marked as seen', { screen })
+        set({ tutorialSeen: { ...current, [screen]: true } })
+      },
+
       resetToDefaults: () => {
         log.warn('Settings reset to defaults!')
         set(DEFAULT_SETTINGS)
@@ -190,7 +201,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'earthcontours-settings',      // localStorage key
-      version: 11,                         // bump when persisted shape changes
+      version: 12,                         // bump when persisted shape changes
       /**
        * Migrations:
        * v1→v2: snap old verticalExaggeration values to new set (1|2|4|10|20).
@@ -209,9 +220,16 @@ export const useSettingsStore = create<SettingsStore>()(
        *          batteryMode, targetFPS, downloadOnWifiOnly, dataResolution,
        *          defaultRegionId).  Default showBandLines to false (moved
        *          to Advanced).
+       * v11→v12: add tutorialSeen (per-screen first-visit hint flags).
        */
       migrate: (persisted: unknown, fromVersion: number) => {
         const state = persisted as Record<string, unknown>
+        if (fromVersion < 12) {
+          log.info('Migrating settings v11→v12: add tutorialSeen')
+          if (state.tutorialSeen === undefined) {
+            state.tutorialSeen = { map: false, scan: false, explore: false }
+          }
+        }
         if (fromVersion < 11) {
           log.info('Migrating settings v10→v11: removing orphaned keys, band lines default off')
           for (const key of REMOVED_KEYS_V11) delete state[key]
@@ -293,6 +311,7 @@ export const useSettingsStore = create<SettingsStore>()(
         showBandLines: state.showBandLines,
         seeThroughMountains: state.seeThroughMountains,
         showDebugPanel: state.showDebugPanel,
+        tutorialSeen: state.tutorialSeen,
       }),
       onRehydrateStorage: () => (state, error) => {
         if (error) {
