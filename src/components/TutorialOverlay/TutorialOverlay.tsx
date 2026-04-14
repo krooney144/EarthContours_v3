@@ -256,7 +256,7 @@ const ScanTutorial: React.FC = () => (
     <div className={`${styles.callout} ${styles.scanGyro}`}>
       <div className={styles.calloutContent}>
         <span className={styles.calloutLabel}>Gyroscope</span>
-        <span className={styles.calloutSub}>Face correct direction first</span>
+        <span className={styles.calloutSub}>Live compass + tilt</span>
       </div>
       <div className={styles.btnPreview}><IconGyro /></div>
     </div>
