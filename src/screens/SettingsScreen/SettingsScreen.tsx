@@ -127,7 +127,7 @@ const AdvancedSection: React.FC<AdvancedSectionProps> = ({ children }) => {
         aria-expanded={open}
         aria-controls="advanced-content"
       >
-        <span className={styles.sectionIcon} aria-hidden="true">⚙</span>
+        <span className={styles.sectionIcon} aria-hidden="true">◇</span>
         <span className={styles.sectionTitle}>Advanced</span>
         <span className={`${styles.advancedChevron} ${open ? styles.advancedChevronOpen : ''}`} aria-hidden="true">▾</span>
       </button>
@@ -278,7 +278,7 @@ const SettingsScreen: React.FC = () => {
 
         {/* ── Map ── */}
         <Section
-          icon="🗺"
+          icon="⊕"
           title="Map"
           note="Overlays marked “shared” also appear on the Explore 3D view."
         >
@@ -304,7 +304,7 @@ const SettingsScreen: React.FC = () => {
 
         {/* ── Explore ── */}
         <Section
-          icon="⛰"
+          icon="⬡"
           title="Explore"
           note="Overlays are shared with Map — toggle them in the Map section."
         >
@@ -329,7 +329,7 @@ const SettingsScreen: React.FC = () => {
         </Section>
 
         {/* ── Scan ── */}
-        <Section icon="👁" title="Scan">
+        <Section icon="◉" title="Scan">
           <Row label="Contour Lines" description="Show elevation contour lines in Scan view">
             <Toggle id="toggle-contours" label="Toggle contour lines" checked={settings.showContourLines} onChange={settings.toggleContourLines} />
           </Row>
@@ -413,7 +413,7 @@ const SettingsScreen: React.FC = () => {
         </AdvancedSection>
 
         {/* ── Feedback & Support ── */}
-        <Section icon="✉" title="Feedback & Support">
+        <Section icon="◈" title="Feedback & Support">
           <div className={styles.feedbackArea}>
             <textarea
               className={styles.textarea}
