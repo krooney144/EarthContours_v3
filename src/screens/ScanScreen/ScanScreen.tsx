@@ -61,6 +61,7 @@ import type { Peak, SkylineData, SkylineBand, SkylineRequest, RefinedArc, PeakRe
 import { DEPTH_BANDS, SILHOUETTE_FLOATS_PER_CANDIDATE, NEAR_PROFILE_SAMPLES, NEAR_PROFILE_AGL_LIMIT } from '../../core/types'
 import { NavigateHint } from '../../components/NavigateHint/NavigateHint'
 import { TutorialOverlay } from '../../components/TutorialOverlay/TutorialOverlay'
+import { TutorialHint } from '../../components/TutorialHint/TutorialHint'
 import styles from './ScanScreen.module.css'
 
 const log = createLogger('SCREEN:SCAN')
@@ -3691,7 +3692,8 @@ const ScanScreen: React.FC = () => {
         skylineReady={skylineData !== null}
       />
 
-      {/* Tutorial overlay */}
+      {/* Tutorial overlay + first-visit hint */}
+      <TutorialHint screen="scan" />
       <TutorialOverlay screen="scan" />
     </div>
   )

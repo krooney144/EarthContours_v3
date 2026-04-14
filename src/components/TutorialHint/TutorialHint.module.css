@@ -1,0 +1,44 @@
+/**
+ * TutorialHint — small top-center pill, tappable, auto-fades after 4s.
+ * Sits just below the top header / compass strip on each screen.
+ */
+
+.hint {
+  position: absolute;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-overlay);
+
+  font-family: var(--font-display);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  color: var(--ec-text-secondary);
+
+  background: var(--ec-bg-overlay);
+  border: 1px solid var(--ec-glow-soft);
+  border-radius: var(--radius-full);
+  padding: 6px 14px;
+  white-space: nowrap;
+  cursor: pointer;
+
+  box-shadow: var(--shadow-glow);
+  opacity: 0.92;
+  transition: opacity 1.5s ease-out;
+  animation: hint-fade-in 400ms ease-out;
+}
+
+.hint:hover {
+  opacity: 1;
+  color: var(--ec-text-accent);
+}
+
+.fading {
+  opacity: 0;
+  pointer-events: none;
+}
+
+@keyframes hint-fade-in {
+  from { opacity: 0; transform: translate(-50%, -4px); }
+  to   { opacity: 0.92; transform: translate(-50%, 0); }
+}
