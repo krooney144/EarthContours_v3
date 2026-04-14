@@ -2662,11 +2662,9 @@ const ScanScreen: React.FC = () => {
 
   // ── Gyroscope mode ──────────────────────────────────────────────────────
   // When active, DeviceOrientationEvent drives heading + pitch.
+  // Heading uses iOS webkitCompassHeading (true north) so the scene auto-aligns
+  // with the physical compass — no manual calibration required.
   // Drag gesture disables gyro (user must tap button to re-enable).
-  // TODO: Use gyroscope heading as compass truth for AR overlay.
-  // TODO: Smooth gyro input with low-pass filter to reduce jitter.
-  // TODO: Handle iOS 13+ permission prompt (DeviceOrientationEvent.requestPermission).
-  // TODO: Show brief toast when gyro is activated/deactivated.
   const [isGyroActive, setIsGyroActive] = useState(false)
   const gyroListenerRef = useRef<((e: DeviceOrientationEvent) => void) | null>(null)
 
@@ -2906,7 +2904,10 @@ const ScanScreen: React.FC = () => {
       // webkitCompassHeading is the true compass heading on iOS (alpha is relative)
       const heading = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading
         ?? (e.alpha !== null ? (360 - e.alpha) % 360 : null)
-      const pitch = e.beta !== null ? clamp(e.beta - 90, -80, 80) : null
+      // Phone upright (beta=90) → pitch=0 (horizon centered).
+      // Phone tilted up / camera toward sky (beta>90) → negative pitch → project() moves horizon down → more sky visible.
+      // Phone tilted down / camera toward ground (beta<90) → positive pitch → project() moves horizon up → more ground visible.
+      const pitch = e.beta !== null ? clamp(90 - e.beta, -80, 80) : null
 
       if (heading !== null) {
         set_heading_from_gyro(heading)
