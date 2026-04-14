@@ -70,6 +70,7 @@ const log = createLogger('SCREEN:SCAN')
 
 const MAX_DIST          = 400_000     // Maximum render distance (m) — extended for high-AGL viewing
 const MAX_PEAK_DIST     = 400_000     // Max distance for peak label display (m)
+const REFINE_MIN_DIST_M = 25_000      // Peaks closer than this use silhouette/band fallback; skip refinement
 const EARTH_R           = 6_371_000  // Earth radius (m)
 const REFRACTION_K      = 0.13       // Atmospheric refraction coefficient
 const DEG_TO_RAD        = Math.PI / 180
@@ -2498,7 +2499,7 @@ function drawScanCanvas(
   // Horizon pool (up to 20, tallest-looking first) catches prominent far peaks.
   // Pool order is preserved through placement so the overlap resolver serves
   // near peaks before horizon peaks when screen real estate runs out.
-  const NEAR_POOL_M    = 30_000
+  const NEAR_POOL_M    = 15_000
   const NEAR_POOL_MAX  = 20
   const HORIZON_POOL_MAX = 20
 
@@ -2596,13 +2597,13 @@ function drawScanCanvas(
   // below serves them in that order so near peaks win label slots when the
   // scene is crowded. No re-sort here.
 
-  // Limit to 12 labels max, then resolve overlaps with rect collision
+  // Limit to 8 labels max, then resolve overlaps with rect collision
   const resolved: PeakScreenPos[] = []
   interface LabelRect { left: number; right: number; top: number; bottom: number }
   const placedRects: LabelRect[] = []
 
   for (const pos of peakPositions) {
-    if (resolved.length >= 12) break
+    if (resolved.length >= 8) break
 
     // Try each stem height, pick the first that doesn't overlap
     let placed = false
@@ -3046,6 +3047,8 @@ const ScanScreen: React.FC = () => {
       const dy = (peak.lat - vLat) * 111_132
       const dist = Math.sqrt(dx * dx + dy * dy)
       if (dist > MAX_PEAK_DIST || dist < 100) continue
+      // Skip refinement for near peaks — silhouettes + band fallback arc carry them.
+      if (dist < REFINE_MIN_DIST_M) continue
 
       // Determine which band this peak falls in
       const peakDist_m = dist
