@@ -2492,9 +2492,47 @@ function drawScanCanvas(
     isPeakVisible(p, activeLat, activeLng, eyeElev, heading_deg, hfov, visibilityEnvelope),
   )
 
-  const topPeaks = visiblePeaks
-    .sort((a, b) => b.elevation_m - a.elevation_m)
-    .slice(0, 25)
+  // ── Dual-pool candidate selection ───────────────────────────────────────────
+  // Near pool (up to 20, nearest first) guarantees close peaks always get a
+  // shot at a label slot even when they don't dominate the angular sort.
+  // Horizon pool (up to 20, tallest-looking first) catches prominent far peaks.
+  // Pool order is preserved through placement so the overlap resolver serves
+  // near peaks before horizon peaks when screen real estate runs out.
+  const NEAR_POOL_M    = 30_000
+  const NEAR_POOL_MAX  = 20
+  const HORIZON_POOL_MAX = 20
+
+  const cosActiveLat = Math.cos(activeLat * DEG_TO_RAD)
+  const peakMeta = visiblePeaks.map(p => {
+    const dx = (p.lng - activeLng) * 111_320 * cosActiveLat
+    const dy = (p.lat - activeLat) * 111_132
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+    const peakAngle = Math.atan2(p.elevation_m - curvDrop - eyeElev, dist)
+    return { peak: p, dist, peakAngle }
+  })
+
+  const nearPool = peakMeta
+    .filter(m => m.dist < NEAR_POOL_M)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, NEAR_POOL_MAX)
+
+  const horizonPool = [...peakMeta]
+    .sort((a, b) => b.peakAngle - a.peakAngle)
+    .slice(0, HORIZON_POOL_MAX)
+
+  const seen = new Set<string>()
+  const topPeaks: Peak[] = []
+  for (const m of nearPool) {
+    if (seen.has(m.peak.id)) continue
+    seen.add(m.peak.id)
+    topPeaks.push(m.peak)
+  }
+  for (const m of horizonPool) {
+    if (seen.has(m.peak.id)) continue
+    seen.add(m.peak.id)
+    topPeaks.push(m.peak)
+  }
 
   for (const peak of topPeaks) {
     const projected = projectFirstPerson(
@@ -2554,8 +2592,9 @@ function drawScanCanvas(
   const STEM_TALL  = 106 * dprEst // tall stagger
   const STEMS = [STEM_SHORT, STEM_MED, STEM_TALL]
 
-  // Sort by elevation descending so highest peaks get priority placement
-  peakPositions.sort((a, b) => b.elevation_m - a.elevation_m)
+  // Pool order is preserved (near peaks first, then horizon): the resolver
+  // below serves them in that order so near peaks win label slots when the
+  // scene is crowded. No re-sort here.
 
   // Limit to 12 labels max, then resolve overlaps with rect collision
   const resolved: PeakScreenPos[] = []
