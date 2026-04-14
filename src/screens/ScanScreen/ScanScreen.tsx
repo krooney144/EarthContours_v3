@@ -70,6 +70,7 @@ const log = createLogger('SCREEN:SCAN')
 
 const MAX_DIST          = 400_000     // Maximum render distance (m) — extended for high-AGL viewing
 const MAX_PEAK_DIST     = 400_000     // Max distance for peak label display (m)
+const REFINE_MIN_DIST_M = 25_000      // Peaks closer than this use silhouette/band fallback; skip refinement
 const EARTH_R           = 6_371_000  // Earth radius (m)
 const REFRACTION_K      = 0.13       // Atmospheric refraction coefficient
 const DEG_TO_RAD        = Math.PI / 180
@@ -2492,9 +2493,47 @@ function drawScanCanvas(
     isPeakVisible(p, activeLat, activeLng, eyeElev, heading_deg, hfov, visibilityEnvelope),
   )
 
-  const topPeaks = visiblePeaks
-    .sort((a, b) => b.elevation_m - a.elevation_m)
-    .slice(0, 25)
+  // ── Dual-pool candidate selection ───────────────────────────────────────────
+  // Near pool (up to 20, nearest first) guarantees close peaks always get a
+  // shot at a label slot even when they don't dominate the angular sort.
+  // Horizon pool (up to 20, tallest-looking first) catches prominent far peaks.
+  // Pool order is preserved through placement so the overlap resolver serves
+  // near peaks before horizon peaks when screen real estate runs out.
+  const NEAR_POOL_M    = 15_000
+  const NEAR_POOL_MAX  = 20
+  const HORIZON_POOL_MAX = 20
+
+  const cosActiveLat = Math.cos(activeLat * DEG_TO_RAD)
+  const peakMeta = visiblePeaks.map(p => {
+    const dx = (p.lng - activeLng) * 111_320 * cosActiveLat
+    const dy = (p.lat - activeLat) * 111_132
+    const dist = Math.sqrt(dx * dx + dy * dy)
+    const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+    const peakAngle = Math.atan2(p.elevation_m - curvDrop - eyeElev, dist)
+    return { peak: p, dist, peakAngle }
+  })
+
+  const nearPool = peakMeta
+    .filter(m => m.dist < NEAR_POOL_M)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, NEAR_POOL_MAX)
+
+  const horizonPool = [...peakMeta]
+    .sort((a, b) => b.peakAngle - a.peakAngle)
+    .slice(0, HORIZON_POOL_MAX)
+
+  const seen = new Set<string>()
+  const topPeaks: Peak[] = []
+  for (const m of nearPool) {
+    if (seen.has(m.peak.id)) continue
+    seen.add(m.peak.id)
+    topPeaks.push(m.peak)
+  }
+  for (const m of horizonPool) {
+    if (seen.has(m.peak.id)) continue
+    seen.add(m.peak.id)
+    topPeaks.push(m.peak)
+  }
 
   for (const peak of topPeaks) {
     const projected = projectFirstPerson(
@@ -2554,16 +2593,17 @@ function drawScanCanvas(
   const STEM_TALL  = 106 * dprEst // tall stagger
   const STEMS = [STEM_SHORT, STEM_MED, STEM_TALL]
 
-  // Sort by elevation descending so highest peaks get priority placement
-  peakPositions.sort((a, b) => b.elevation_m - a.elevation_m)
+  // Pool order is preserved (near peaks first, then horizon): the resolver
+  // below serves them in that order so near peaks win label slots when the
+  // scene is crowded. No re-sort here.
 
-  // Limit to 12 labels max, then resolve overlaps with rect collision
+  // Limit to 8 labels max, then resolve overlaps with rect collision
   const resolved: PeakScreenPos[] = []
   interface LabelRect { left: number; right: number; top: number; bottom: number }
   const placedRects: LabelRect[] = []
 
   for (const pos of peakPositions) {
-    if (resolved.length >= 12) break
+    if (resolved.length >= 8) break
 
     // Try each stem height, pick the first that doesn't overlap
     let placed = false
@@ -3007,6 +3047,8 @@ const ScanScreen: React.FC = () => {
       const dy = (peak.lat - vLat) * 111_132
       const dist = Math.sqrt(dx * dx + dy * dy)
       if (dist > MAX_PEAK_DIST || dist < 100) continue
+      // Skip refinement for near peaks — silhouettes + band fallback arc carry them.
+      if (dist < REFINE_MIN_DIST_M) continue
 
       // Determine which band this peak falls in
       const peakDist_m = dist
