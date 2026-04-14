@@ -181,7 +181,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
         terrainZoom: 10,
         loadingState: 'success',
         loadingProgress: 100,
-        loadingMessage: `${region.name} — real elevation data`,
+        loadingMessage: 'Real elevation data loaded',
       })
 
       log.info('Region load COMPLETE', { regionId, peaks: peaks.length })
@@ -321,7 +321,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
         isRealElevation: true,
         loadingState: 'success',
         loadingProgress: 100,
-        loadingMessage: `Custom area — real elevation data (z${tileZoom})`,
+        loadingMessage: 'Real elevation data loaded',
       })
 
       log.info('Custom bounds load COMPLETE', {

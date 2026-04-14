@@ -16,7 +16,7 @@ EarthContours renders real elevation data across five screens, all driven from t
 | **SCAN** | AR-style first-person panorama. Smooth silhouette strokes with curvature-based tapering, unified terrain fill, and 6-band depth-layered ridgelines (ultra-near → far). 400 km range, 50 ft→2000 ft progressive contours, two-pass peak refinement, pinch-zoom FOV (15°–100°). |
 | **EXPLORE** | 3D orbit terrain view in ENU metre-space. Free-roam pan/rotate/tilt/zoom, marching-squares contour lines, real peak labels projected from lat/lng, location pin synced from Map. |
 | **MAP** | Dual-canvas map: Three.js globe at zoom 1–6 (brightness-lifted DEM texture, Fresnel atmosphere, star field, Mercator-corrected UVs) crossfading to a flat Canvas-2D DEM map at zoom 7+ with Natural Earth overlays. Smooth 0.1-step zoom slider; tap-to-explore sets the viewpoint everywhere. |
-| **SETTINGS** | Units, labels, 4 SCAN render toggles (contour, fill, band, silhouette), visual exaggeration, theme, reduce-motion, debug panel, feedback submission. |
+| **SETTINGS** | Reorganized v3 audit: Appearance (dark mode, units), Map overlays (shared with Explore), Explore (vertical exaggeration), Scan render toggles, Location (GPS permission), collapsible Advanced dev flags, feedback submission. |
 
 **Elevation data** comes from the public AWS Terrarium RGB-encoded DEM tile set (`s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png`). Terrain RGB is decoded as `elevation_m = R×256 + G + B/256 − 32768`. No API key required.
 
@@ -93,7 +93,7 @@ EarthContours_v3/
 │   ├── store/
 │   │   ├── index.ts                # Barrel re-exports
 │   │   ├── uiStore.ts              # Active screen, splash, transitions, preview mode
-│   │   ├── settingsStore.ts        # User prefs (persisted to localStorage, migrated v3→v7)
+│   │   ├── settingsStore.ts        # User prefs (persisted to localStorage, migrations up to v11)
 │   │   ├── cameraStore.ts          # AR camera (heading/pitch/height) + orbit camera
 │   │   ├── locationStore.ts        # GPS + explore location (source of truth for viewpoint)
 │   │   ├── mapViewStore.ts         # Map center/zoom with clamp+wrap helpers
@@ -157,7 +157,7 @@ Filter the browser console for `ELEVATION LOAD` or `TERRAIN SOURCE` to see which
   - Two-pass peak refinement: main thread dispatches visible peaks back to the worker, which fetches 1–2 zoom levels higher and dense-ray-marches for crisp peak ridgelines.
   - Main-thread AGL reprojection (`reprojectBands()`) — no worker round-trip for height changes.
   - Stale-while-revalidate: old skyline keeps rendering while the worker recomputes; pan moves under 1.5 km skip recompute.
-  - Settings exposes 4 independent SCAN toggles (contour lines, terrain fill, band lines, silhouette lines) and a comprehensive debug panel.
+  - Settings exposes 3 Scan toggles (contour lines, terrain fill, silhouette lines) plus Advanced flags (band lines, see-through mountains, debug panel).
 
 - **EXPLORE**
   - Marching-squares contour extraction at elevation thresholds, drawn in Three.js via `TerrainRenderer.ts`.
@@ -196,11 +196,12 @@ Users can submit feedback from Settings. The client posts to `/api/feedback` (Ve
 
 ## Settings Persisted to localStorage
 
-- **Units**: Imperial / Metric
-- **Labels**: peaks, rivers, lakes, glaciers, coastlines, town labels
-- **SCAN toggles**: contour lines, terrain fill, band lines, silhouette lines
-- **Visual**: dark/light theme, color theme, label size, vertical exaggeration, reduce motion, contour animation
-- **Location**: GPS accuracy, auto-detect region
-- **Performance**: target FPS, battery mode
-- **Data**: resolution, WiFi-only downloads, default region
-- **Debug**: debug panel toggle
+The settings system was audited and simplified in v3 (persist version 11). Every setting below has a visible effect in the app; orphaned settings (town labels, label size, color theme, reduce motion, GPS accuracy, auto-detect region, battery mode, target FPS, download-on-WiFi, data resolution, default region, coord format, contour animation) were removed.
+
+- **Appearance**: dark mode, unit system (imperial / metric)
+- **Map** (overlays — some shared with Explore): roads, peak labels, coastlines, rivers, lakes, glaciers
+- **Explore**: vertical exaggeration (1× / 1.5× / 2× / 4×)
+- **Scan**: contour lines, terrain fill, silhouette lines
+- **Advanced** (collapsible, closed every open, not persisted open-state): band lines, see-through mountains, debug panel
+
+GPS permission status sits in its own always-visible Location section, separate from Advanced.

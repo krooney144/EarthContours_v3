@@ -150,21 +150,16 @@ button:focus-visible {
   text-shadow: 0 0 8px var(--ec-glow), 0 0 20px rgba(132, 209, 219, 0.3);
 }
 
-/* ── Reduce Motion ───────────────────────────────────────────────────────── */
+/* ── Reduce Motion (system-level only) ────────────────────────────────────── */
 
-/* Respect system reduce motion AND the in-app setting (applied via class on body) */
+/* Respect the OS-level reduced-motion preference.  The in-app setting was
+ * removed in the v3 settings audit. */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-body.reduce-motion *, body.reduce-motion *::before, body.reduce-motion *::after {
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
-  transition-duration: 0.01ms !important;
 }
 
 /* ── Canvas and WebGL ────────────────────────────────────────────────────── */

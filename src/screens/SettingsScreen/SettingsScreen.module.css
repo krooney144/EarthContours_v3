@@ -75,6 +75,47 @@
   text-transform: uppercase;
 }
 
+/* ── Section Note (small explanatory text under a section header) ─────────── */
+
+.sectionNote {
+  padding: 0 var(--space-5) var(--space-3);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  color: var(--ec-text-muted);
+  font-style: italic;
+  line-height: 1.4;
+  letter-spacing: 0.02em;
+}
+
+/* ── Advanced (collapsible) ───────────────────────────────────────────────── */
+
+.advancedHeader {
+  width: 100%;
+  padding: var(--space-4) var(--space-5) var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+
+.advancedHeader:hover .sectionTitle {
+  color: var(--ec-text-primary);
+}
+
+.advancedChevron {
+  margin-left: auto;
+  font-size: 14px;
+  color: var(--ec-text-muted);
+  transition: transform var(--transition-fast);
+}
+
+.advancedChevronOpen {
+  transform: rotate(180deg);
+}
+
 /* ── About text ──────────────────────────────────────────────────────────── */
 
 .aboutText {

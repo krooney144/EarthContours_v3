@@ -60,7 +60,7 @@ Six Zustand stores in `src/store/` (re-exported from `src/store/index.ts`):
 | Store | Role |
 |-------|------|
 | `uiStore` | Active screen, transitions, splash, preview mode |
-| `settingsStore` | User prefs — persisted to localStorage; migrations up to v7 |
+| `settingsStore` | User prefs — persisted to localStorage; migrations up to v11 |
 | `cameraStore` | AR camera (heading/pitch/height) + orbit camera (theta/phi/radius/panX/panZ) |
 | `locationStore` | GPS + explore location + sensor data — source of truth for the active viewpoint |
 | `mapViewStore` | Map center (lat/lng) + zoom with clamp/wrap helpers |
@@ -141,8 +141,23 @@ Six Zustand stores in `src/store/` (re-exported from `src/store/index.ts`):
 
 ### SETTINGS
 
-- Units, coord format, label toggles (peaks / rivers / lakes / glaciers / coastlines / towns), SCAN render toggles (contour / fill / band / silhouette), visual exaggeration, theme, reduce-motion, debug panel, contour animation, battery mode, target FPS, download-on-WiFi, data resolution, default region, feedback form.
-- Settings persisted through Zustand `persist` middleware; migrations up to v7 (the latest replaced `solidTerrain` with `showSilhouetteLines`).
+Reorganized in v3 as part of a full audit. Every setting below is actually consumed somewhere — orphaned settings (town labels, label size, color theme, reduce motion, GPS accuracy, auto-detect region, battery mode, target FPS, download-on-WiFi, data resolution, default region, coord format, contour animation) were removed in persist migration v11.
+
+Sections (in screen order):
+
+- **Appearance**: dark mode, unit system.
+- **Map**: roads (Map-only), peak labels, coastlines, rivers, lakes, glaciers. Overlays marked shared also render on Explore.
+- **Explore**: vertical exaggeration (also adjustable inline on the Explore screen; `MapScreen` area-select auto-overrides to 1/1.5/2/4 based on selection size).
+- **Scan**: contour lines, terrain fill, silhouette lines.
+- **Location**: GPS permission status + request / re-enable help. Visible to every user (not gated behind Advanced).
+- **Advanced** (collapsible, **closed on every open** — local state, not persisted): band lines (default OFF), see-through mountains, debug panel.
+- **Feedback & Support**: feedback form, export logs, reset all settings.
+
+Notes:
+- `verticalExaggeration` affects **Explore only**. It does not change Scan rendering.
+- `showDebugPanel` surfaces the Scan diagnostics overlay only.
+- Map's bottom coord bar is hard-wired to decimal format (`MapScreen.tsx`) — the user-facing `coordFormat` setting was removed.
+- Settings persisted through Zustand `persist` middleware; current persist version is **v11** (see `settingsStore.ts` for full migration history).
 
 ---
 
