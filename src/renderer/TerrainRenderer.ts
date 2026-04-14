@@ -64,6 +64,11 @@ export class TerrainRenderer {
   // Geo overlays
   private geoOverlayGroup: THREE.Group | null = null
 
+  // Base (elevation-only) vertex colors for the terrain mesh, captured when
+  // buildTerrain runs. applyGlacierShading tints a copy of this buffer onto
+  // the mesh; restoring just means copying this back.
+  private terrainBaseColors: Float32Array | null = null
+
   // Terrain dimensions in metres (set when terrain loads)
   private terrainWidth_m = 0
   private terrainDepth_m = 0
@@ -247,6 +252,10 @@ export class TerrainRenderer {
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geometry.computeVertexNormals()
 
+    // Snapshot the elevation-only colors so glacier shading can be toggled
+    // on/off without rebuilding the whole mesh.
+    this.terrainBaseColors = new Float32Array(colors)
+
     const material = new THREE.MeshPhongMaterial({
       vertexColors: true,
       side: THREE.FrontSide,
@@ -367,6 +376,127 @@ export class TerrainRenderer {
 
     posAttr.needsUpdate = true
     this.terrainMesh.geometry.computeVertexNormals()
+  }
+
+  // ── Glacier shading on the terrain mesh ─────────────────────────────────────
+
+  /**
+   * Tint the terrain mesh's vertex colors ice-blue wherever a vertex falls
+   * inside a glacier polygon. Replaces the old "flat ShapeGeometry sheet at
+   * average Y" fill, which floated high above valley floors for glaciers
+   * with steep vertical relief (e.g. Bering Glacier).
+   *
+   * `innerRings` are treated as holes (nunataks) — a vertex inside a hole
+   * is NOT shaded as ice.
+   *
+   * Pass `show=false` (or an empty glacier list) to restore the base
+   * elevation-only colors.
+   */
+  applyGlacierShading(mesh: TerrainMeshData, glaciers: Glacier[], show: boolean): void {
+    if (!this.terrainMesh || !this.terrainBaseColors) return
+    const geo = this.terrainMesh.geometry
+    const colorAttr = geo.getAttribute('color') as THREE.BufferAttribute | undefined
+    if (!colorAttr) return
+
+    const colors = colorAttr.array as Float32Array
+    // Always start from the elevation-only baseline so toggling is idempotent.
+    colors.set(this.terrainBaseColors)
+
+    if (show && glaciers.length > 0) {
+      const { bounds, width, height } = mesh
+
+      // Ice-blue tint + blend ratio. 0 = keep base color, 1 = pure ice.
+      // 0.6 preserves enough of the base palette that high/low ice still
+      // shows elevation shading, while reading clearly as glaciated surface.
+      const ICE_R = 230 / 255
+      const ICE_G = 240 / 255
+      const ICE_B = 255 / 255
+      const BLEND = 0.6
+
+      // Pre-filter glaciers to those intersecting the current terrain bounds,
+      // and pre-compute each polygon's bbox so point-in-polygon can skip fast.
+      type PreppedRing = { pts: LatLng[]; minLat: number; maxLat: number; minLng: number; maxLng: number }
+      const preppedGlaciers: { outer: PreppedRing; holes: PreppedRing[] }[] = []
+
+      const prep = (pts: LatLng[]): PreppedRing => {
+        let minLat = Infinity, maxLat = -Infinity, minLng = Infinity, maxLng = -Infinity
+        for (const p of pts) {
+          if (p.lat < minLat) minLat = p.lat
+          if (p.lat > maxLat) maxLat = p.lat
+          if (p.lng < minLng) minLng = p.lng
+          if (p.lng > maxLng) maxLng = p.lng
+        }
+        return { pts, minLat, maxLat, minLng, maxLng }
+      }
+
+      for (const g of glaciers) {
+        // Bounding-box overlap with terrain bounds — skip glaciers off-screen.
+        const outer = prep(g.polygon)
+        if (outer.maxLat < bounds.south || outer.minLat > bounds.north ||
+            outer.maxLng < bounds.west  || outer.minLng > bounds.east) continue
+        const holes = g.innerRings ? g.innerRings.map(prep) : []
+        preppedGlaciers.push({ outer, holes })
+      }
+
+      if (preppedGlaciers.length === 0) {
+        colorAttr.needsUpdate = true
+        return
+      }
+
+      // Even-odd point-in-polygon (ray cast east). Standard algorithm.
+      const pointInRing = (lat: number, lng: number, ring: PreppedRing): boolean => {
+        if (lat < ring.minLat || lat > ring.maxLat ||
+            lng < ring.minLng || lng > ring.maxLng) return false
+        const pts = ring.pts
+        let inside = false
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+          const yi = pts[i].lat, xi = pts[i].lng
+          const yj = pts[j].lat, xj = pts[j].lng
+          const intersects = ((yi > lat) !== (yj > lat)) &&
+            (lng < (xj - xi) * (lat - yi) / (yj - yi + 1e-12) + xi)
+          if (intersects) inside = !inside
+        }
+        return inside
+      }
+
+      // Per terrain-grid vertex: check whether it lies inside any glacier
+      // (but outside any inner ring / nunatak) and, if so, blend its color
+      // toward ice.
+      let tinted = 0
+      for (let row = 0; row < height; row++) {
+        const ny = row / (height - 1)
+        const lat = bounds.north - ny * (bounds.north - bounds.south)
+        for (let col = 0; col < width; col++) {
+          const nx = col / (width - 1)
+          const lng = bounds.west + nx * (bounds.east - bounds.west)
+
+          let onIce = false
+          for (const { outer, holes } of preppedGlaciers) {
+            if (!pointInRing(lat, lng, outer)) continue
+            let inHole = false
+            for (const h of holes) {
+              if (pointInRing(lat, lng, h)) { inHole = true; break }
+            }
+            if (!inHole) { onIce = true; break }
+          }
+
+          if (onIce) {
+            const vi = (row * width + col) * 3
+            colors[vi]     = colors[vi]     * (1 - BLEND) + ICE_R * BLEND
+            colors[vi + 1] = colors[vi + 1] * (1 - BLEND) + ICE_G * BLEND
+            colors[vi + 2] = colors[vi + 2] * (1 - BLEND) + ICE_B * BLEND
+            tinted++
+          }
+        }
+      }
+
+      log.info('Glacier shading applied', {
+        glaciers: preppedGlaciers.length,
+        verticesTinted: tinted,
+      })
+    }
+
+    colorAttr.needsUpdate = true
   }
 
   // ── Geographic overlays (rivers, lakes, glaciers, coastlines) ────────────────
@@ -600,7 +730,9 @@ export class TerrainRenderer {
       }
     }
 
-    // ── Glaciers — white/ice-blue semi-transparent fill + darker outline ───
+    // ── Glaciers — outline only; the ice fill is painted as vertex colors on
+    // the terrain mesh itself via applyGlacierShading() below, so it hugs the
+    // DEM topography instead of floating as a flat ShapeGeometry sheet.
     if (options.showGlaciers) {
       const filtered = glaciers.filter(g => boundsIntersects(g.polygon))
       for (const glacier of filtered) {
@@ -609,7 +741,6 @@ export class TerrainRenderer {
         for (const s of segments) allPositions.push(...s)
         if (allPositions.length < 9) continue
 
-        // Darker outline
         const outlineGeo = new THREE.BufferGeometry()
         outlineGeo.setAttribute('position', new THREE.Float32BufferAttribute(allPositions, 3))
         const outlineMat = new THREE.LineBasicMaterial({
@@ -621,38 +752,13 @@ export class TerrainRenderer {
         })
         this.geoOverlayGroup.add(new THREE.LineLoop(outlineGeo, outlineMat))
 
-        // White/ice-blue fill
-        const count = allPositions.length / 3
-        if (count >= 3) {
-          let avgY = 0
-          for (let i = 0; i < count; i++) avgY += allPositions[i * 3 + 1]
-          avgY /= count
-
-          const shape = new THREE.Shape()
-          shape.moveTo(allPositions[0], allPositions[2])
-          for (let i = 1; i < count; i++) {
-            shape.lineTo(allPositions[i * 3], allPositions[i * 3 + 2])
-          }
-          shape.closePath()
-
-          const shapeGeo = new THREE.ShapeGeometry(shape)
-          shapeGeo.rotateX(-Math.PI / 2)
-          const fillMat = new THREE.MeshBasicMaterial({
-            color: 0xddeeff,
-            transparent: true,
-            opacity: 0.3,
-            side: THREE.DoubleSide,
-            depthTest: true,
-            depthWrite: false,
-          })
-          const fillMesh = new THREE.Mesh(shapeGeo, fillMat)
-          fillMesh.position.y = avgY
-          this.geoOverlayGroup.add(fillMesh)
-        }
-
         glacierCount++
       }
     }
+
+    // Paint / unpaint the ice tint onto the terrain mesh. Works both ways —
+    // pass show=false to restore the elevation-only base colors.
+    this.applyGlacierShading(mesh, glaciers, options.showGlaciers)
 
     // Coastlines: no longer rendered as overlay lines — ocean is handled
     // by vertex coloring (dark blue for elev ≤ 0, gradient beach transition).
