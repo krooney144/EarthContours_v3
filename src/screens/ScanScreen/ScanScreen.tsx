@@ -162,10 +162,16 @@ interface ProjectedRefinedArc {
 /**
  * Re-project refined arc angles from raw world data for a new viewer elevation.
  * Each arc has ~240 samples — 20 arcs = ~4,800 atan2 calls, sub-millisecond.
+ *
+ * Per-sample occlusion: if a sample's angle-ratio is below the visibility
+ * envelope (running-max ratio of all terrain from viewer out to the sample's
+ * distance), the sample is marked -π/2 so the existing render loop skips it.
+ * This is the same occlusion mechanism used for contour strands.
  */
 function reprojectRefinedArcs(
   arcs: RefinedArc[],
   viewerElev: number,
+  envelope: VisibilityEnvelope | null,
 ): ProjectedRefinedArc[] {
   return arcs.map(arc => {
     const angles = new Float32Array(arc.numSamples)
@@ -177,7 +183,22 @@ function reprojectRefinedArcs(
         continue
       }
       const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-      angles[i] = Math.atan2(elev - curvDrop - viewerElev, dist)
+      const effElev  = elev - curvDrop
+
+      // Envelope LOS check: hide samples blocked by closer terrain.
+      if (envelope) {
+        const ratio     = (effElev - viewerElev) / dist
+        const bearing   = arc.centerBearing + (-arc.halfWidth + i * arc.stepDeg)
+        const normB     = ((bearing % 360) + 360) % 360
+        const envAi     = Math.round(normB * envelope.resolution) % envelope.numAzimuths
+        const si        = profileDistIndex(envelope.distances, dist)
+        if (si >= 0 && ratio < envelope.envelope[envAi * envelope.numSteps + si]) {
+          angles[i] = -Math.PI / 2
+          continue
+        }
+      }
+
+      angles[i] = Math.atan2(effElev - viewerElev, dist)
     }
     return { angles, arc }
   })
@@ -1348,25 +1369,21 @@ function projectFirstPerson(
 
 // ─── Peak Visibility Check ────────────────────────────────────────────────────
 
-/** Distance threshold for "near" peaks — shown if they have line-of-sight
- *  regardless of whether they poke above the skyline. */
-const ALWAYS_SHOW_PEAK_DIST = 15_000  // 15 km — always label peaks this close
-
 /**
- * Two-tier peak visibility:
- *  1. Close peaks (< 15 km): ALWAYS visible — you'd see the name on a trail
- *     sign, so always label them regardless of terrain occlusion.
- *  2. Far peaks (≥ 15 km): visible only if line-of-sight is clear — peak angle
- *     must be above the ridgeline of every closer band (true occlusion check).
+ * Peak visibility via the shared visibility envelope (same mechanism used by
+ * contour strands and refined arc samples). A peak is visible when:
+ *   1. Inside the FOV and distance window.
+ *   2. Its angle-ratio is ≥ the envelope's running-max ratio at the peak's
+ *      bearing and distance — i.e. no closer terrain blocks line-of-sight.
  *
- * FOV check uses the full horizontal FOV so peaks anywhere in-frame appear.
+ * If the envelope hasn't been built yet (very first frame before skyline data
+ * arrives) we fall back to FOV + distance only — nothing to occlude against.
  */
 function isPeakVisible(
   peak: Peak,
   viewerLat: number, viewerLng: number, viewerElev: number,
   heading_deg: number, hfov: number,
-  skyline: SkylineData,
-  projected: ProjectedBands | null,
+  envelope: VisibilityEnvelope | null,
 ): boolean {
   const cosLat = Math.cos(viewerLat * DEG_TO_RAD)
   const dx = (peak.lng - viewerLng) * 111_320 * cosLat
@@ -1384,34 +1401,20 @@ function isPeakVisible(
   if (angleDiff < -180) angleDiff += 360
   if (Math.abs(angleDiff) > hfov * 0.5) return false
 
-  // Tier 1: close peaks — always visible, no occlusion check
-  if (dist <= ALWAYS_SHOW_PEAK_DIST) return true
+  // No envelope yet → pass on FOV + distance alone.
+  if (!envelope) return true
 
-  // Earth curvature correction
-  const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-  const peakAngle = Math.atan2(peak.elevation_m - curvDrop - viewerElev, dist)
+  // Earth-curvature-corrected angle ratio for the peak.
+  const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+  const peakRatio = (peak.elevation_m - curvDrop - viewerElev) / dist
 
-  // Ridgeline angle — uses re-projected angles (AGL-aware)
-  const ridgeAngle = skylineAngleAt(skyline, bearing, projected)
-  const tolerance = 0.15 * DEG_TO_RAD
+  const normB = ((bearing % 360) + 360) % 360
+  const envAi = Math.round(normB * envelope.resolution) % envelope.numAzimuths
+  const si    = profileDistIndex(envelope.distances, dist)
+  if (si < 0) return true  // peak closer than first profile step — show it
 
-  // Tier 2: skyline peak — above the overall ridgeline
-  if (peakAngle >= ridgeAngle - tolerance) return true
-
-  // Tier 3: line-of-sight check — peak is below the overall ridgeline,
-  // but check if ALL closer bands actually occlude it. If any closer band's
-  // ridgeline is above the peak angle, it's occluded.
-  let occluded = false
-  for (let bi = 0; bi < skyline.bands.length; bi++) {
-    const bandCfg = DEPTH_BANDS[bi]
-    if (!bandCfg || bandCfg.minDist >= dist) continue  // band is farther than peak
-    const bandAngle = bandAngleAt(skyline, bi, bearing, projected)
-    if (bandAngle > -Math.PI / 2 + 0.001 && peakAngle < bandAngle - tolerance) {
-      occluded = true
-      break
-    }
-  }
-  return !occluded
+  const maxRatio = envelope.envelope[envAi * envelope.numSteps + si]
+  return peakRatio >= maxRatio
 }
 
 // ─── Quick Render (SkylineData) ───────────────────────────────────────────────
@@ -2350,6 +2353,7 @@ function drawScanCanvas(
   projectedArcs: ProjectedRefinedArc[] | null,
   silhouetteLayers: SilhouetteLayer[][] | null,
   projectedNearProfile: ProjectedNearProfile | null,
+  visibilityEnvelope: VisibilityEnvelope | null,
   fillBoundaries: FillBoundary[] = [],
   showBandLines: boolean = true,
   showFill: boolean = true,
@@ -2482,24 +2486,15 @@ function drawScanCanvas(
 
   const peakPositions: PeakScreenPos[] = []
 
-  const visiblePeaks = skylineData
-    ? peaks.filter(p => isPeakVisible(p, activeLat, activeLng, eyeElev, heading_deg, hfov, skylineData, projectedBands))
-    : peaks.filter(p => {
-        const cosLat = Math.cos(activeLat * DEG_TO_RAD)
-        const dx = (p.lng - activeLng) * 111_320 * cosLat
-        const dy = (p.lat - activeLat) * 111_132
-        const dist = Math.sqrt(dx * dx + dy * dy)
-        if (dist > MAX_PEAK_DIST || dist < 100) return false
-        const bearing = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
-        let angleDiff = bearing - heading_deg
-        if (angleDiff > 180) angleDiff -= 360
-        if (angleDiff < -180) angleDiff += 360
-        return Math.abs(angleDiff) <= hfov * 0.5
-      })
+  // Unified visibility: envelope-gated LOS when we have it, FOV/distance-only
+  // during the brief window before skyline/envelope is built.
+  const visiblePeaks = peaks.filter(p =>
+    isPeakVisible(p, activeLat, activeLng, eyeElev, heading_deg, hfov, visibilityEnvelope),
+  )
 
   const topPeaks = visiblePeaks
     .sort((a, b) => b.elevation_m - a.elevation_m)
-    .slice(0, 15)
+    .slice(0, 25)
 
   for (const peak of topPeaks) {
     const projected = projectFirstPerson(
@@ -2562,13 +2557,13 @@ function drawScanCanvas(
   // Sort by elevation descending so highest peaks get priority placement
   peakPositions.sort((a, b) => b.elevation_m - a.elevation_m)
 
-  // Limit to 8 labels max, then resolve overlaps with rect collision
+  // Limit to 12 labels max, then resolve overlaps with rect collision
   const resolved: PeakScreenPos[] = []
   interface LabelRect { left: number; right: number; top: number; bottom: number }
   const placedRects: LabelRect[] = []
 
   for (const pos of peakPositions) {
-    if (resolved.length >= 8) break
+    if (resolved.length >= 12) break
 
     // Try each stem height, pick the first that doesn't overlap
     let placed = false
@@ -2716,12 +2711,14 @@ const ScanScreen: React.FC = () => {
 
   // ── Re-project refined arc angles when AGL changes ─────────────────────────
   // Uses separate refinedArcs state (from second-pass 'refine-peaks' response).
-  // ~4,800 atan2 calls for 20 arcs — sub-millisecond.
+  // ~4,800 atan2 calls for 20 arcs — sub-millisecond. Envelope lookup marks
+  // any sample blocked by closer terrain as sentinel so the render loop skips
+  // it, matching the occlusion semantics of peak dots/labels.
   const projectedArcs = useMemo<ProjectedRefinedArc[] | null>(() => {
     if (!skylineData || refinedArcs.length === 0) return null
     const viewerElev = skylineData.computedAt.groundElev + height_m
-    return reprojectRefinedArcs(refinedArcs, viewerElev)
-  }, [skylineData, refinedArcs, height_m])
+    return reprojectRefinedArcs(refinedArcs, viewerElev, visibilityEnvelope)
+  }, [skylineData, refinedArcs, height_m, visibilityEnvelope])
 
   // ── Build silhouette layers (AGL-dependent, runs on height change) ─────────
   // Front-to-back sweep over AGL-independent candidates.  ~75K atan2 calls, sub-ms.
@@ -3092,6 +3089,7 @@ const ScanScreen: React.FC = () => {
       contourStrands, projectedArcs,
       silhouetteLayers,
       projectedNearProfile,
+      visibilityEnvelope,
       fillBoundaries,
       showBandLines, showFill, showPeakLabels,
       showContourLines, showSilhouetteLines, darkMode,
@@ -3107,7 +3105,7 @@ const ScanScreen: React.FC = () => {
     activeLat, activeLng,
     activePeaks,
     skylineData, projectedBands, contourStrands, projectedArcs, silhouetteLayers,
-    projectedNearProfile,
+    projectedNearProfile, visibilityEnvelope,
     showBandLines, showFill, showPeakLabels, showContourLines, showSilhouetteLines, darkMode,
   ])
 
