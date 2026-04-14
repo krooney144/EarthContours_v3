@@ -2621,7 +2621,7 @@ function drawScanCanvas(
 const ScanScreen: React.FC = () => {
   const {
     heading_deg, pitch_deg, height_m, fov,
-    applyARDrag, setHeightFromSlider, applyFovScale, setFov,
+    applyARDrag, setHeightFromSlider, setHeight_m, applyFovScale, setFov,
   } = useCameraStore()
   const { activeLat, activeLng, mode, gpsLat, requestGPS, switchToGPS } = useLocationStore()
   const { peaks } = useTerrainStore()
@@ -2632,8 +2632,13 @@ const ScanScreen: React.FC = () => {
   const dragState        = useRef<DragState>({ isDragging: false, lastX: 0, lastY: 0 })
   const pinchState       = useRef<PinchState>({ isPinching: false, lastDist: 0, startFov: fov })
   const sliderRef        = useRef<HTMLDivElement>(null)
-  const sliderDragRef    = useRef<{ isDragging: boolean; startY: number; startHeight: number }>({
-    isDragging: false, startY: 0, startHeight: height_m,
+  const sliderDragRef    = useRef<{
+    isDragging: boolean
+    startY: number
+    startHeight: number
+    lastRawHeight: number   // last un-snapped height (metres) — flushed to store on pointer-up
+  }>({
+    isDragging: false, startY: 0, startHeight: height_m, lastRawHeight: height_m,
   })
   const zoomSliderRef    = useRef<HTMLDivElement>(null)
   const zoomDragRef      = useRef<{ isDragging: boolean; startY: number; startFov: number }>({
@@ -3207,7 +3212,12 @@ const ScanScreen: React.FC = () => {
   const handleSliderPointerDown = useCallback((e: React.PointerEvent) => {
     e.stopPropagation()
     sliderRef.current?.setPointerCapture(e.pointerId)
-    sliderDragRef.current = { isDragging: true, startY: e.clientY, startHeight: height_m }
+    sliderDragRef.current = {
+      isDragging: true,
+      startY: e.clientY,
+      startHeight: height_m,
+      lastRawHeight: height_m,
+    }
   }, [height_m])
 
   const handleSliderPointerMove = useCallback((e: React.PointerEvent) => {
@@ -3218,13 +3228,22 @@ const ScanScreen: React.FC = () => {
     const deltaY       = e.clientY - sliderDragRef.current.startY
     const heightDelta  = -(deltaY / sliderHeight) * (MAX_HEIGHT_M - MIN_HEIGHT_M)
     const newHeight    = clamp(sliderDragRef.current.startHeight + heightDelta, MIN_HEIGHT_M, MAX_HEIGHT_M)
+    // Track the exact un-snapped height so pointer-up can flush the final value
+    sliderDragRef.current.lastRawHeight = newHeight
+    // setHeightFromSlider snaps to AGL_SLIDER_STEP_FT and no-ops when unchanged,
+    // keeping the recompute cascade from running on every pointer event.
     setHeightFromSlider(metersToFeet(newHeight))
   }, [setHeightFromSlider])
 
   const handleSliderPointerUp = useCallback((e: React.PointerEvent) => {
     sliderRef.current?.releasePointerCapture(e.pointerId)
+    if (sliderDragRef.current.isDragging) {
+      // Flush the exact released height so the displayed value matches where the
+      // finger dropped, not the last grid line crossed.
+      setHeight_m(sliderDragRef.current.lastRawHeight)
+    }
     sliderDragRef.current.isDragging = false
-  }, [])
+  }, [setHeight_m])
 
   // ── Zoom slider (FOV) ──────────────────────────────────────────────────────
   // Drag up = zoom in (smaller FOV), drag down = zoom out (larger FOV)

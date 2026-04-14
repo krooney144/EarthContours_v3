@@ -42,6 +42,17 @@ export const MAX_HEIGHT_M = 3048
 /** Minimum eye height in meters (10ft ≈ 3m) */
 export const MIN_HEIGHT_M = 3.048
 
+/**
+ * Step size (ft) the AGL slider snaps to while the user is dragging.
+ * The heavy SCAN recompute cascade (visibility envelope, contour strands,
+ * silhouette layers, fill boundaries) only re-runs when height crosses one of
+ * these grid lines, so a larger step = fewer recomputes per drag = smoother
+ * pointer tracking on phones. On pointer-up the exact released value is
+ * committed so the displayed number matches where the finger dropped.
+ * Tune freely: 10 ≈ current behavior, 25 default, 50/100 coarser for low-end devices.
+ */
+export const AGL_SLIDER_STEP_FT = 25
+
 /** Default field of view in degrees */
 export const DEFAULT_FOV = 70
 

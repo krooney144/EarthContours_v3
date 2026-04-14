@@ -25,6 +25,7 @@ import {
   DEFAULT_FOV,
   MIN_HEIGHT_M,
   MAX_HEIGHT_M,
+  AGL_SLIDER_STEP_FT,
   ORBIT_RADIUS_MIN_M,
   ORBIT_RADIUS_MAX_M,
   ORBIT_RADIUS_FALLBACK_M,
@@ -146,16 +147,21 @@ export const useCameraStore = create<CameraStore>()((set, get) => ({
    * Set height from the vertical slider on SCAN screen.
    * The slider shows feet (imperial) but we store meters internally.
    *
-   * Threshold logic: only updates the store if the change exceeds ~3m (10ft).
-   * This prevents excessive re-renders on mobile where slider events fire
-   * rapidly during drag, causing lag in skyline re-projection.
+   * Step-snap: the incoming value is rounded to the nearest AGL_SLIDER_STEP_FT
+   * grid line and only commits when it crosses onto a new grid line. The heavy
+   * SCAN recompute cascade (visibility envelope, contour strands, silhouette
+   * layers) re-runs on every commit, so larger steps = fewer recomputes per
+   * drag = smoother pointer tracking on phones. The exact released value is
+   * committed via setHeight_m() on pointer-up so the displayed number matches
+   * where the finger dropped.
    */
   setHeightFromSlider: (heightFt) => {
-    const height_m = clamp(feetToMeters(heightFt), MIN_HEIGHT_M, MAX_HEIGHT_M)
+    const snappedFt = Math.round(heightFt / AGL_SLIDER_STEP_FT) * AGL_SLIDER_STEP_FT
+    const height_m = clamp(feetToMeters(snappedFt), MIN_HEIGHT_M, MAX_HEIGHT_M)
     const current = get().height_m
-    const THRESHOLD_M = 3.0  // ~10ft minimum change
-    if (Math.abs(height_m - current) < THRESHOLD_M) return
-    log.debug('Height set from slider', { heightFt: heightFt.toFixed(0), height_m: height_m.toFixed(1) })
+    // Bail if the snapped value maps back to the same stored height (within 0.1m)
+    if (Math.abs(height_m - current) < 0.1) return
+    log.debug('Height set from slider', { heightFt: snappedFt.toFixed(0), height_m: height_m.toFixed(1) })
     set({ height_m })
   },
 
