@@ -290,7 +290,7 @@ const ExploreScreen: React.FC = () => {
 
       const angleDelta = angle - lastPinchAngleRef.current
       if (Math.abs(angleDelta) > 0.005) {
-        applyOrbitDrag(angleDelta * 60, 0)
+        applyOrbitDrag(-angleDelta * 60, 0)
         lastPinchAngleRef.current = angle
       }
 
