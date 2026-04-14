@@ -398,6 +398,7 @@
   border-radius: var(--radius-full);
   position: relative;
   margin: var(--space-2) 0;
+  touch-action: none;
 }
 
 .heightSliderFill {
@@ -420,6 +421,15 @@
   border-radius: 50%;
   box-shadow: var(--shadow-glow);
   cursor: ns-resize;
+  touch-action: none;
+}
+
+/* Expanded 35x35 invisible hit area around the 16px thumb.
+   Pointer events on this pseudo-element bubble up to the track's drag handler. */
+.heightSliderThumb::before {
+  content: '';
+  position: absolute;
+  inset: -9.5px;
 }
 
 .heightSliderValue {
