@@ -19,7 +19,7 @@ export const NavigateHint: React.FC = () => {
       className={`${styles.hint} ${visible ? '' : styles.hidden}`}
       aria-hidden="true"
     >
-      Navigate to Map to explore a new area
+      Use the map to choose a new viewpoint
     </div>
   )
 }

@@ -3787,14 +3787,6 @@ const HUDBar: React.FC<HUDBarProps> = ({
         <span className={styles.hudLabel}>AGL</span>
         <span className={styles.hudValue}>{eyeStr}</span>
       </div>
-      {skylineReady && (
-        <>
-          <div className={styles.hudDivider} aria-hidden="true" />
-          <div className={styles.hudItem}>
-            <span className={`${styles.hudValue} ${styles.hudReady}`}>250KM</span>
-          </div>
-        </>
-      )}
     </div>
   )
 }
