@@ -15,6 +15,7 @@
  */
 
 import React, { useEffect } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { useUIStore, useSettingsStore } from './store'
 import SplashScreen from './components/SplashScreen'
 import Nav from './components/Nav'
@@ -140,7 +141,12 @@ const MainApp: React.FC = () => {
 // ─── App Component ───────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
-  return <MainApp />
+  return (
+    <>
+      <MainApp />
+      <Analytics />
+    </>
+  )
 }
 
 export default App
