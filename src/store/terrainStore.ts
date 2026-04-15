@@ -109,7 +109,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
       const uniqueZooms = [...new Set(zoomLevels)]
 
       for (const z of uniqueZooms) {
-        set({ loadingMessage: `Fetching z${z} elevation tiles...` })
+        set({ loadingMessage: 'Loading elevation data...' })
         log.info('Attempting elevation load', { region: region.id, zoom: z })
         try {
           elevations = await loadRegionElevation(
@@ -126,7 +126,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
             // All zoom levels exhausted — propagate the error
             throw new TerrainLoadError(region.id, `Elevation data unavailable — check your network connection`)
           }
-          set({ loadingMessage: `Retrying at lower resolution (z${z - 1})...` })
+          set({ loadingMessage: 'Loading elevation data...' })
         }
       }
 
@@ -181,7 +181,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
         terrainZoom: 10,
         loadingState: 'success',
         loadingProgress: 100,
-        loadingMessage: 'Real elevation data loaded',
+        loadingMessage: 'Elevation data loaded',
       })
 
       log.info('Region load COMPLETE', { regionId, peaks: peaks.length })
@@ -258,7 +258,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
       const uniqueZooms = [...new Set(zoomLevels)]
 
       for (const z of uniqueZooms) {
-        set({ loadingMessage: `Fetching z${z} elevation tiles...` })
+        set({ loadingMessage: 'Loading elevation data...' })
         log.info('Attempting elevation load', { region: customRegion.id, zoom: z })
         try {
           elevations = await loadRegionElevation(
@@ -276,7 +276,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
           if (z === uniqueZooms[uniqueZooms.length - 1]) {
             throw new TerrainLoadError(customRegion.id, `Elevation data unavailable — check your network connection`)
           }
-          set({ loadingMessage: `Retrying at lower resolution (z${z - 1})...` })
+          set({ loadingMessage: 'Loading elevation data...' })
         }
       }
 
@@ -321,7 +321,7 @@ export const useTerrainStore = create<TerrainStore>()((set, get) => ({
         isRealElevation: true,
         loadingState: 'success',
         loadingProgress: 100,
-        loadingMessage: 'Real elevation data loaded',
+        loadingMessage: 'Elevation data loaded',
       })
 
       log.info('Custom bounds load COMPLETE', {

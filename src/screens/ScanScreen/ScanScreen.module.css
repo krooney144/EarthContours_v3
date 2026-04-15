@@ -486,13 +486,6 @@
   white-space: nowrap;
 }
 
-/* Ready indicator — shown when 250km skyline is available */
-.hudReady {
-  color: var(--ec-success);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-}
-
 .hudSubLabel {
   font-family: var(--font-display);
   font-size: 8px;

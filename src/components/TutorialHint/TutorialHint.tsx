@@ -18,7 +18,7 @@ import styles from './TutorialHint.module.css'
 const log = createLogger('TUTORIAL-HINT')
 
 /** How long the hint stays fully visible before the fade begins. */
-const VISIBLE_MS = 4000
+const VISIBLE_MS = 6000
 /** CSS fade-out duration — must match `transition: opacity` in the stylesheet. */
 const FADE_MS = 1500
 
