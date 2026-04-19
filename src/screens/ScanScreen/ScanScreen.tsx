@@ -2276,17 +2276,22 @@ function drawScanCanvas(
   const horizonY = getHorizonY(cam)
 
   // ── 1. Sky gradient ─────────────────────────────────────────────────────────
-  // Dark mode: deep ocean-void gradient. Light mode: daylight sky gradient.
-  const skyGrad = ctx.createLinearGradient(0, 0, 0, H)
+  // Dark mode: pinned to horizonY so stop 0.5 always sits on the horizon. Stop
+  // 1.0 lands ~70° below horizon; pixels outside the gradient line clamp to
+  // the end stops (black above, deep blue below). Replaces the old horizon line.
+  // Light mode: screen-relative daylight gradient.
+  let skyGrad: CanvasGradient
   if (darkMode) {
-    skyGrad.addColorStop(0,    '#000810')
-    skyGrad.addColorStop(0.20, '#020c18')
-    skyGrad.addColorStop(0.50, '#051520')
-    skyGrad.addColorStop(0.78, '#071a2a')
-    skyGrad.addColorStop(0.90, '#0c2235')
-    skyGrad.addColorStop(1.0,  '#0f2c42')
+    const pxPerRad = W / (hfov * Math.PI / 180)
+    const span = (70 * Math.PI / 180) * pxPerRad
+    skyGrad = ctx.createLinearGradient(0, horizonY - span, 0, horizonY + span)
+    skyGrad.addColorStop(0.00, '#000000')
+    skyGrad.addColorStop(0.50, '#000000')
+    skyGrad.addColorStop(0.65, '#030a14')
+    skyGrad.addColorStop(0.82, '#071a2a')
+    skyGrad.addColorStop(1.00, '#0f2c42')
   } else {
-    // Light mode: bright sky gradient (pale blue → warmer horizon)
+    skyGrad = ctx.createLinearGradient(0, 0, 0, H)
     skyGrad.addColorStop(0,    '#87CEEB')
     skyGrad.addColorStop(0.30, '#A8D8EA')
     skyGrad.addColorStop(0.60, '#C5E3F0')
@@ -2360,25 +2365,7 @@ function drawScanCanvas(
       silRes, darkMode)
   }
 
-  // ── 3. Horizon glow ──────────────────────────────────────────────────────────
-  // Dark mode: teal glow. Light mode: subtle warm horizon haze.
-  const glowGrad = ctx.createLinearGradient(0, horizonY - 12, 0, horizonY + 12)
-  if (darkMode) {
-    glowGrad.addColorStop(0,   'rgba(132, 209, 219, 0)')
-    glowGrad.addColorStop(0.5, 'rgba(132, 209, 219, 0.22)')
-    glowGrad.addColorStop(1,   'rgba(132, 209, 219, 0)')
-  } else {
-    glowGrad.addColorStop(0,   'rgba(100, 130, 160, 0)')
-    glowGrad.addColorStop(0.5, 'rgba(100, 130, 160, 0.15)')
-    glowGrad.addColorStop(1,   'rgba(100, 130, 160, 0)')
-  }
-  ctx.fillStyle = glowGrad
-  ctx.fillRect(0, Math.round(horizonY - 12), W, 24)
-
-  ctx.fillStyle = darkMode ? 'rgba(132, 209, 219, 0.18)' : 'rgba(80, 100, 120, 0.12)'
-  ctx.fillRect(0, Math.round(horizonY), W, 1)
-
-  // ── 4. Peak placement — all through project() ─────────────────────────────
+  // ── 3. Peak placement — all through project() ─────────────────────────────
 
   const peakPositions: PeakScreenPos[] = []
 
