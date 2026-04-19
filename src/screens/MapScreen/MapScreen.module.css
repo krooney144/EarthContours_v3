@@ -246,27 +246,59 @@
 }
 
 /**
- * Selection overlay — floating panel with instructions, dimensions, and EXPLORE button.
- * Border color changes based on area size severity (teal → orange → red).
+ * Top prompt stack — anchors the EXPLORE area-select overlay and the SCAN nudge
+ * at top-center. Children render in normal flow so a second prompt sits below
+ * the first with a small gap. Wrapper is pointer-transparent; each child
+ * re-enables pointer events for itself.
  */
-.selectionOverlay {
+.topPromptStack {
   position: absolute;
   top: var(--space-3);
   left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  z-index: var(--z-hud);
+  pointer-events: none;
+}
+
+.topPromptStack > * {
+  pointer-events: auto;
+}
+
+/**
+ * Selection overlay — floating panel with instructions, dimensions, and EXPLORE button.
+ * Border color changes based on area size severity (teal → orange → red).
+ */
+.selectionOverlay {
+  position: relative;
   background: rgba(13, 30, 46, 0.95);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid var(--ec-border-active);
   border-radius: var(--radius-md);
   padding: var(--space-3) var(--space-4);
-  z-index: var(--z-hud);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-2);
   min-width: 200px;
   transition: border-color 200ms ease;
+}
+
+/**
+ * SCAN nudge — same shell as .selectionOverlay; class exists so future tweaks
+ * (animation, accent color) can target the SCAN prompt without affecting EXPLORE.
+ */
+.scanPromptOverlay {
+  animation: scanPromptIn 180ms ease-out;
+}
+
+@keyframes scanPromptIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0);    }
 }
 
 /* Severity color overrides for selection overlay border */

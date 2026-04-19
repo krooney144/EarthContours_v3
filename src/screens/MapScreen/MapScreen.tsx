@@ -637,6 +637,17 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
   const gpsPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [showTapHint, setShowTapHint] = useState(true)
 
+  // SCAN nudge — transient prompt shown after user sets a location by tapping the
+  // map or globe. Auto-fades after 4s. Mirrors the EXPLORE area-select prompt so
+  // the two entry points feel parallel.
+  const [showScanPrompt, setShowScanPrompt] = useState(false)
+  const scanPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const triggerScanPrompt = useCallback(() => {
+    setShowScanPrompt(true)
+    if (scanPromptTimerRef.current) clearTimeout(scanPromptTimerRef.current)
+    scanPromptTimerRef.current = setTimeout(() => setShowScanPrompt(false), 4000)
+  }, [])
+
   const [cursorLat, setCursorLat] = useState(DEFAULT_MAP_CENTER.lat)
   const [cursorLng, setCursorLng] = useState(DEFAULT_MAP_CENTER.lng)
 
@@ -1761,6 +1772,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
           log.info('Globe tap → setting explore location', { lat: lat.toFixed(4), lng: lng.toFixed(4) })
           setExploreLocation(lat, lng)
           setShowTapHint(false)
+          triggerScanPrompt()
         }
       }
     }
@@ -1769,7 +1781,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     if (Math.abs(gd.velocityX) > 0.0001 || Math.abs(gd.velocityY) > 0.0001) {
       requestGlobeRender()
     }
-  }, [requestGlobeRender, setExploreLocation])
+  }, [requestGlobeRender, setExploreLocation, triggerScanPrompt])
 
   // Globe wheel zoom — smooth fractional steps (0.3 per tick for smooth feel)
   const handleGlobeWheel = useCallback((e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1997,10 +2009,11 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
       })
       setExploreLocation(coords.lat, coords.lng)
       setShowTapHint(false)
+      triggerScanPrompt()
     }
 
     dragRef.current.isDragging = false
-  }, [centerLat, centerLng, zoom, setExploreLocation, isSelectingArea, selectionStart, selectionEnd])
+  }, [centerLat, centerLng, zoom, setExploreLocation, isSelectingArea, selectionStart, selectionEnd, triggerScanPrompt])
 
   // ── Scroll Zoom ───────────────────────────────────────────────────────────────
 
@@ -2356,6 +2369,11 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
         <button className={styles.controlBtn} onClick={handleZoomOut} aria-label="Zoom out">−</button>
       </div>
 
+      {/* Top prompt stack — anchors the EXPLORE area-select overlay and the
+          transient SCAN nudge at top-center. Either may be visible alone, or
+          (defensively) both at once: SCAN sits below EXPLORE with a small gap. */}
+      <div className={styles.topPromptStack}>
+
       {/* Area selection overlay — instructions, dimensions, and EXPLORE action.
           Drag-select is for EXPLORE only. Offline downloads use predetermined
           regions in Settings (curated for correct size + accurate estimates). */}
@@ -2416,6 +2434,33 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
         </div>
       )}
 
+      {/* SCAN nudge — appears for ~4s after a user-initiated location tap.
+          Reuses the EXPLORE overlay shell so the two CTAs feel parallel. */}
+      {showScanPrompt && (
+        <div className={`${styles.selectionOverlay} ${styles.scanPromptOverlay}`} role="status">
+          <div className={styles.selectionHint}>
+            VIEW LOCATION PANORAMA
+          </div>
+          <button
+            className={`${styles.controlBtn} ${styles.selectionActionBtn}`}
+            onClick={() => {
+              log.info('Scan prompt → navigating to SCAN')
+              if (scanPromptTimerRef.current) {
+                clearTimeout(scanPromptTimerRef.current)
+                scanPromptTimerRef.current = null
+              }
+              setShowScanPrompt(false)
+              navigateTo('scan')
+            }}
+            aria-label="Open this location in 360° Scan view"
+          >
+            SCAN 360 →
+          </button>
+        </div>
+      )}
+
+      </div>
+
       {/* Tap hint — brief instruction for first-time users.
           Fades after first interaction. Not a full tutorial — just enough
           to get started. */}
@@ -2423,7 +2468,7 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
         className={`${styles.tapHint} ${!showTapHint ? styles.hidden : ''}`}
         aria-hidden="true"
       >
-        Tap to explore · Pinch to zoom · Drag to pan
+        Tap to select location · Pinch to zoom · Drag to pan
       </div>
 
       {/* Globe debug toggle */}
