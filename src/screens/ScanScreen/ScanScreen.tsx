@@ -37,10 +37,10 @@
  *   7  Peak label cards (HTML overlay)
  *
  * ── Peak visibility ──────────────────────────────────────────────────────────
- *   isPeakVisible() compares peak elevation angle against the ridgeline.
- *   Dots snap to the max per-band ridgeline angle at the peak's bearing,
- *   ensuring they match exactly what's drawn on screen.  Snap is upward-only:
- *   if the peak's true angle is above all bands, its real position is kept.
+ *   Heading/FOV-independent peak data (distance, bearing, LOS gate, ridge-snap)
+ *   is precomputed in the peakMeta useMemo and reused frame-to-frame.  The
+ *   per-frame draw only does FOV culling + project().  Snap is upward-only:
+ *   if the peak's true angle is above the ridgeline, its real position is kept.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -1272,6 +1272,15 @@ interface PeakScreenPos {
   stemHeight:  number  // Variable stem height for staggered labels (avoids overlap)
 }
 
+// Heading/FOV-independent peak data, cached per location/AGL/skyline change.
+// effectiveAngle bakes in the ridge-snap so the per-frame loop just calls project().
+interface PeakMeta {
+  peak:           Peak
+  dist_m:         number
+  bearing:        number  // degrees
+  effectiveAngle: number  // radians, post ridge-snap
+}
+
 // ─── The Camera — Single Source of Truth ──────────────────────────────────────
 //
 // Every bearing/elevation → screen pixel conversion goes through this one function.
@@ -1376,59 +1385,6 @@ function projectFirstPerson(
   return { screenX: x, screenY: y, horizDist: world.horizDist }
 }
 
-
-// ─── Peak Visibility Check ────────────────────────────────────────────────────
-
-/**
- * Peak visibility via the shared visibility envelope (same mechanism used by
- * contour strands and refined arc samples). A peak is visible when:
- *   1. Inside the FOV and distance window.
- *   2. Its angle-ratio is ≥ the envelope's running-max ratio at the peak's
- *      bearing and distance — i.e. no closer terrain blocks line-of-sight.
- *
- * If the envelope hasn't been built yet (very first frame before skyline data
- * arrives) we fall back to FOV + distance only — nothing to occlude against.
- */
-function isPeakVisible(
-  peak: Peak,
-  viewerLat: number, viewerLng: number, viewerElev: number,
-  heading_deg: number, hfov: number,
-  envelope: VisibilityEnvelope | null,
-): boolean {
-  const cosLat = Math.cos(viewerLat * DEG_TO_RAD)
-  const dx = (peak.lng - viewerLng) * 111_320 * cosLat
-  const dy = (peak.lat - viewerLat) * 111_132
-  const dist = Math.sqrt(dx * dx + dy * dy)
-
-  if (dist > MAX_PEAK_DIST || dist < 100) return false
-
-  // Bearing from viewer to peak
-  const bearing = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
-
-  // Full-FOV check — show peaks anywhere in the camera frustum
-  let angleDiff = bearing - heading_deg
-  if (angleDiff > 180) angleDiff -= 360
-  if (angleDiff < -180) angleDiff += 360
-  if (Math.abs(angleDiff) > hfov * 0.5) return false
-
-  // No envelope yet → pass on FOV + distance alone.
-  if (!envelope) return true
-
-  // Earth-curvature-corrected angle ratio for the peak.
-  const curvDrop  = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-  const peakRatio = (peak.elevation_m - curvDrop - viewerElev) / dist
-
-  const normB = ((bearing % 360) + 360) % 360
-  const envAi = Math.round(normB * envelope.resolution) % envelope.numAzimuths
-  const si    = profileDistIndex(envelope.distances, dist)
-  if (si < 0) return true  // peak closer than first profile step — show it
-
-  const maxRatio = envelope.envelope[envAi * envelope.numSteps + si]
-  if (dist <= NEAR_PEAK_TOL_MAX_M) {
-    return peakRatio + NEAR_PEAK_TOL_RATIO >= maxRatio
-  }
-  return peakRatio >= maxRatio
-}
 
 // ─── Quick Render (SkylineData) ───────────────────────────────────────────────
 
@@ -2236,7 +2192,7 @@ function renderPeakRidgelines(
 
 function drawScanCanvas(
   canvas: HTMLCanvasElement,
-  peaks: Peak[],
+  peakMeta: PeakMeta[],
   heading_deg: number,
   pitch_deg: number,
   eyeHeight_m: number,
@@ -2369,94 +2325,30 @@ function drawScanCanvas(
 
   const peakPositions: PeakScreenPos[] = []
 
-  // Unified visibility: envelope-gated LOS when we have it, FOV/distance-only
-  // during the brief window before skyline/envelope is built.
-  const visiblePeaks = peaks.filter(p =>
-    isPeakVisible(p, activeLat, activeLng, eyeElev, heading_deg, hfov, visibilityEnvelope),
-  )
+  // Per-frame: FOV gate + project. Geographic work (distance, bearing, LOS,
+  // ridge-snap, dual-pool selection) is precomputed in the peakMeta useMemo
+  // and only recomputes on location/AGL/skyline change.
+  const halfFov = hfov * 0.5
+  for (const m of peakMeta) {
+    let angDiff = m.bearing - heading_deg
+    if (angDiff > 180)  angDiff -= 360
+    if (angDiff < -180) angDiff += 360
+    if (Math.abs(angDiff) > halfFov) continue
 
-  // ── Dual-pool candidate selection ───────────────────────────────────────────
-  // Near pool (up to 20, nearest first) guarantees close peaks always get a
-  // shot at a label slot even when they don't dominate the angular sort.
-  // Horizon pool (up to 20, tallest-looking first) catches prominent far peaks.
-  // Pool order is preserved through placement so the overlap resolver serves
-  // near peaks before horizon peaks when screen real estate runs out.
-  const NEAR_POOL_M    = 15_000
-  const NEAR_POOL_MAX  = 20
-  const HORIZON_POOL_MAX = 20
-
-  const cosActiveLat = Math.cos(activeLat * DEG_TO_RAD)
-  const peakMeta = visiblePeaks.map(p => {
-    const dx = (p.lng - activeLng) * 111_320 * cosActiveLat
-    const dy = (p.lat - activeLat) * 111_132
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-    const peakAngle = Math.atan2(p.elevation_m - curvDrop - eyeElev, dist)
-    return { peak: p, dist, peakAngle }
-  })
-
-  const nearPool = peakMeta
-    .filter(m => m.dist < NEAR_POOL_M)
-    .sort((a, b) => a.dist - b.dist)
-    .slice(0, NEAR_POOL_MAX)
-
-  const horizonPool = [...peakMeta]
-    .sort((a, b) => b.peakAngle - a.peakAngle)
-    .slice(0, HORIZON_POOL_MAX)
-
-  const seen = new Set<string>()
-  const topPeaks: Peak[] = []
-  for (const m of nearPool) {
-    if (seen.has(m.peak.id)) continue
-    seen.add(m.peak.id)
-    topPeaks.push(m.peak)
-  }
-  for (const m of horizonPool) {
-    if (seen.has(m.peak.id)) continue
-    seen.add(m.peak.id)
-    topPeaks.push(m.peak)
-  }
-
-  for (const peak of topPeaks) {
-    const projected = projectFirstPerson(
-      peak.lat, peak.lng, peak.elevation_m,
-      activeLat, activeLng, eyeElev, cam,
-    )
-    if (!projected) continue
-
-    let { screenX, screenY, horizDist } = projected
-    if (screenX < -50 || screenX > W + 50) continue
-    if (horizDist > MAX_PEAK_DIST) continue
-
-    // Snap skyline peaks to the ridgeline so dots sit exactly on the drawn line.
-    // Near-ground peaks (below ridge) keep their true projected position.
-    if (skylineData) {
-      const bearing = calculateBearing(
-        { lat: activeLat, lng: activeLng },
-        { lat: peak.lat, lng: peak.lng },
-      )
-      const curvDrop = (horizDist * horizDist) / (2 * EARTH_R) * (1 - REFRACTION_K)
-      const peakAngle = Math.atan2(peak.elevation_m - curvDrop - eyeElev, horizDist)
-      const ridgeAngle = skylineAngleAt(skylineData, bearing, projectedBands)
-
-      // Only snap if peak is at/above the ridgeline (skyline peak)
-      if (ridgeAngle > -Math.PI / 2 + 0.001 && peakAngle >= ridgeAngle - 0.003) {
-        const ridgePos = project(bearing, ridgeAngle, cam)
-        screenY = Math.min(screenY, ridgePos.y)
-      }
-    }
+    const { x, y } = project(m.bearing, m.effectiveAngle, cam)
+    if (x < -50 || x > W + 50) continue
 
     peakPositions.push({
-      id:          peak.id,
-      name:        peak.name,
-      nameEn:      peak.nameEn,
-      elevation_m: peak.elevation_m,
-      dist_km:     horizDist / 1000,
-      bearing:     calculateBearing({ lat: activeLat, lng: activeLng }, { lat: peak.lat, lng: peak.lng }),
-      lat:         peak.lat,
-      lng:         peak.lng,
-      screenX,
-      screenY,
+      id:          m.peak.id,
+      name:        m.peak.name,
+      nameEn:      m.peak.nameEn,
+      elevation_m: m.peak.elevation_m,
+      dist_km:     m.dist_m / 1000,
+      bearing:     m.bearing,
+      lat:         m.peak.lat,
+      lng:         m.peak.lng,
+      screenX:     x,
+      screenY:     y,
       stemHeight:  38,  // default, resolved below
     })
   }
@@ -2682,6 +2574,84 @@ const ScanScreen: React.FC = () => {
     log.info('Near-field profile reprojected', { ms: dt.toFixed(1), agl: height_m.toFixed(0) })
     return result
   }, [skylineData, height_m])
+
+  // ── Heading/FOV-independent peak metadata (cache layer) ──────────────────
+  // Distance, bearing, LOS gate, curvature-corrected angle, ridge-snap, and
+  // dual-pool selection — all heading-independent. Recomputes only when
+  // location, AGL, or skyline changes. Heading drag/pinch reuses this cache.
+  const peakMeta = useMemo<PeakMeta[]>(() => {
+    if (activePeaks.length === 0) return []
+    const groundElev = skylineData ? skylineData.computedAt.groundElev : 0
+    const eyeElev = groundElev + height_m
+    const cosLat = Math.cos(activeLat * DEG_TO_RAD)
+
+    const candidates: { peak: Peak; dist_m: number; bearing: number; effectiveAngle: number; peakAngle: number }[] = []
+
+    for (const peak of activePeaks) {
+      const dx = (peak.lng - activeLng) * 111_320 * cosLat
+      const dy = (peak.lat - activeLat) * 111_132
+      const dist = Math.sqrt(dx * dx + dy * dy)
+      if (dist > MAX_PEAK_DIST || dist < 100) continue
+
+      const bearing = ((Math.atan2(dx, dy) * 180 / Math.PI) + 360) % 360
+      const curvDrop = (dist * dist) / (2 * EARTH_R) * (1 - REFRACTION_K)
+      const peakAngle = Math.atan2(peak.elevation_m - curvDrop - eyeElev, dist)
+
+      // LOS gate via visibility envelope (matches isPeakVisible semantics).
+      if (visibilityEnvelope) {
+        const peakRatio = (peak.elevation_m - curvDrop - eyeElev) / dist
+        const envAi = Math.round(bearing * visibilityEnvelope.resolution) % visibilityEnvelope.numAzimuths
+        const si = profileDistIndex(visibilityEnvelope.distances, dist)
+        if (si >= 0) {
+          const maxRatio = visibilityEnvelope.envelope[envAi * visibilityEnvelope.numSteps + si]
+          const passes = dist <= NEAR_PEAK_TOL_MAX_M
+            ? peakRatio + NEAR_PEAK_TOL_RATIO >= maxRatio
+            : peakRatio >= maxRatio
+          if (!passes) continue
+        }
+      }
+
+      // Ridge-snap (upward-only): peaks at/above the rendered ridgeline get
+      // their angle snapped so the dot kisses the silhouette line.
+      let effectiveAngle = peakAngle
+      if (skylineData) {
+        const ridgeAngle = skylineAngleAt(skylineData, bearing, projectedBands)
+        if (ridgeAngle > -Math.PI / 2 + 0.001 && peakAngle >= ridgeAngle - 0.003) {
+          effectiveAngle = Math.max(peakAngle, ridgeAngle)
+        }
+      }
+
+      candidates.push({ peak, dist_m: dist, bearing, effectiveAngle, peakAngle })
+    }
+
+    // Dual-pool selection — near (≤15 km, nearest first) + horizon (tallest-angle).
+    const NEAR_POOL_M = 15_000
+    const NEAR_POOL_MAX = 20
+    const HORIZON_POOL_MAX = 20
+
+    const nearPool = candidates
+      .filter(m => m.dist_m < NEAR_POOL_M)
+      .sort((a, b) => a.dist_m - b.dist_m)
+      .slice(0, NEAR_POOL_MAX)
+
+    const horizonPool = [...candidates]
+      .sort((a, b) => b.peakAngle - a.peakAngle)
+      .slice(0, HORIZON_POOL_MAX)
+
+    const seen = new Set<string>()
+    const out: PeakMeta[] = []
+    for (const m of nearPool) {
+      if (seen.has(m.peak.id)) continue
+      seen.add(m.peak.id)
+      out.push({ peak: m.peak, dist_m: m.dist_m, bearing: m.bearing, effectiveAngle: m.effectiveAngle })
+    }
+    for (const m of horizonPool) {
+      if (seen.has(m.peak.id)) continue
+      seen.add(m.peak.id)
+      out.push({ peak: m.peak, dist_m: m.dist_m, bearing: m.bearing, effectiveAngle: m.effectiveAngle })
+    }
+    return out
+  }, [activePeaks, activeLat, activeLng, height_m, skylineData, projectedBands, visibilityEnvelope])
 
   // ── Initialise Web Worker ─────────────────────────────────────────────────
 
@@ -3011,7 +2981,7 @@ const ScanScreen: React.FC = () => {
 
     const rawPos = drawScanCanvas(
       canvas,
-      activePeaks,
+      peakMeta,
       heading_deg, pitch_deg, height_m,
       activeLat, activeLng,
       fov, skylineData, projectedBands,
@@ -3032,7 +3002,7 @@ const ScanScreen: React.FC = () => {
   }, [
     heading_deg, pitch_deg, height_m, fov,
     activeLat, activeLng,
-    activePeaks,
+    peakMeta,
     skylineData, projectedBands, contourStrands, projectedArcs, silhouetteLayers,
     projectedNearProfile, visibilityEnvelope,
     showBandLines, showFill, showPeakLabels, showContourLines, showSilhouetteLines, darkMode,
@@ -3635,7 +3605,7 @@ const PeakLabel: React.FC<{
   units: 'imperial' | 'metric'
   canvasH: number
 }> = ({ pos, units, canvasH }) => {
-  const distFade  = Math.max(0.25, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
+  const distFade  = Math.max(0.5, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
   const isNearTop = pos.screenY < canvasH * 0.22
 
   // Format distance respecting unit preference
