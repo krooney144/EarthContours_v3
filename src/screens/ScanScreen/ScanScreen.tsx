@@ -698,8 +698,9 @@ function renderSilhouetteGlow(
 
     // Glow passes: drawn wide→narrow so narrower overlays wider.
     // Y offset: negative = sky (up), positive = terrain (down).
+    // Widest "terrain bleed" pass (widthMul 6) was dropped: large translucent
+    // fills are the dominant fill-rate cost on mobile GPUs during heading drag.
     const passes = [
-      { widthMul: 6,   alphaMul: 0.10, yOff: +baseOffset },        // terrain bleed (wide, dim, down)
       { widthMul: 3,   alphaMul: 0.22, yOff: -baseOffset * 0.7 },  // sky halo (medium, brighter, up)
       { widthMul: 1.5, alphaMul: 0.45, yOff: -baseOffset * 0.3 },  // sky core (tight, brightest, slight up)
     ]
