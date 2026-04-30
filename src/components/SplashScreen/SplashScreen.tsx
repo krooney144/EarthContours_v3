@@ -1,68 +1,74 @@
 /**
  * EarthContours — Splash Screen
  *
- * Shown on cold load while the default region's terrain loads in the
- * background. Exits when loadRegion resolves OR after a 600ms minimum
- * (whichever is later) so the splash never flashes too briefly.
+ * Shows for SPLASH_DURATION_MS (2400ms) when the app first loads.
+ * During this time, terrain data loads in the background.
  *
- * The progress bar is driven by terrainStore.loadingProgress directly —
- * no fake animation.
+ * The progress bar animates from 0 to 100% over the splash duration.
+ * It doesn't necessarily reflect real loading progress — it's a UX
+ * affordance to let the user know something is happening.
  */
 
 import React, { useEffect, useState } from 'react'
 import { useUIStore, useTerrainStore } from '../../store'
 import { createLogger } from '../../core/logger'
-import { DEFAULT_REGION_ID } from '../../core/constants'
+import { SPLASH_DURATION_MS, DEFAULT_REGION_ID } from '../../core/constants'
 import styles from './SplashScreen.module.css'
 
 const log = createLogger('COMPONENT:SPLASH')
-
-const MIN_SPLASH_MS = 600
-const FADE_MS = 400
 
 const SplashScreen: React.FC = () => {
   const setSplashComplete = useUIStore((state) => state.setSplashComplete)
   const initializeLayout = useUIStore((state) => state.initializeLayout)
   const loadRegion = useTerrainStore((state) => state.loadRegion)
   const loadingMessage = useTerrainStore((state) => state.loadingMessage)
-  const loadingProgress = useTerrainStore((state) => state.loadingProgress)
 
+  const [progress, setProgress] = useState(0)
   const [isFadingOut, setIsFadingOut] = useState(false)
 
   useEffect(() => {
-    log.info('Splash screen mounted', { minMs: MIN_SPLASH_MS })
+    log.info('Splash screen mounted', { splashDuration: SPLASH_DURATION_MS })
 
+    // Start loading the default region in the background while the splash shows
+    log.info('Starting background terrain load', { region: DEFAULT_REGION_ID })
+    loadRegion(DEFAULT_REGION_ID).catch((err) => {
+      log.error('Background terrain load failed', err)
+      // Non-fatal — app will continue, terrain will show error state
+    })
+
+    // Initialize layout (preview mode vs mobile) ONCE here
     initializeLayout()
 
-    const startTime = Date.now()
-    const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+    // Animate progress bar over the splash duration
+    const progressInterval = setInterval(() => {
+      setProgress((prev) => {
+        // Slow down near 90% — real loading might take longer
+        const increment = prev < 70 ? 3 : prev < 88 ? 1 : 0.3
+        return Math.min(prev + increment, 92)
+      })
+    }, 80)
 
-    log.info('Starting background terrain load', { region: DEFAULT_REGION_ID })
-
-    const loadPromise = loadRegion(DEFAULT_REGION_ID).catch((err) => {
-      // Non-fatal — terrain UI shows error state; splash still exits.
-      log.error('Background terrain load failed', err)
-    })
-
-    const minPromise = wait(MIN_SPLASH_MS)
-
-    let cancelled = false
-    Promise.all([loadPromise, minPromise]).then(() => {
-      if (cancelled) return
-      log.info('Splash exit conditions met', { elapsedMs: Date.now() - startTime })
+    // After splash duration, start fade out then complete
+    const splashTimer = setTimeout(() => {
+      log.info('Splash duration complete — fading out...')
+      setProgress(100)
       setIsFadingOut(true)
+
+      // Wait for fade animation to complete before hiding
       setTimeout(() => {
-        if (cancelled) return
         log.info('Splash fade complete — app ready')
         setSplashComplete()
-      }, FADE_MS)
-    })
+      }, 400)  // matches CSS animation duration
+    }, SPLASH_DURATION_MS)
 
     return () => {
-      cancelled = true
+      clearInterval(progressInterval)
+      clearTimeout(splashTimer)
       log.debug('Splash screen cleanup')
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps — intentionally run once
+
+  log.debug('Splash render', { progress: progress.toFixed(0), isFadingOut })
 
   return (
     <div
@@ -91,11 +97,11 @@ const SplashScreen: React.FC = () => {
           role="progressbar"
           aria-valuemin={0}
           aria-valuemax={100}
-          aria-valuenow={Math.round(loadingProgress)}
+          aria-valuenow={Math.round(progress)}
         >
           <div
             className={styles.progressFill}
-            style={{ width: `${loadingProgress}%` }}
+            style={{ width: `${progress}%` }}
           />
         </div>
         <div className={styles.loadingText}>
