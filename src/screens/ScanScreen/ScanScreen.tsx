@@ -3635,7 +3635,7 @@ const PeakLabel: React.FC<{
   units: 'imperial' | 'metric'
   canvasH: number
 }> = ({ pos, units, canvasH }) => {
-  const distFade  = Math.max(0.25, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
+  const distFade  = Math.max(0.6, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
   const isNearTop = pos.screenY < canvasH * 0.22
 
   // Format distance respecting unit preference
