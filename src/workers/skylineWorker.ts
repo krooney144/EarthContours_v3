@@ -708,15 +708,6 @@ async function handleRefinePeaks(peaks: PeakRefineItem[]): Promise<void> {
 self.onmessage = async (e: MessageEvent) => {
   const data = e.data
 
-  // Inject tiles prefetched on the main thread (via the 4-tier elevation cache)
-  // before dispatching. fetchWorkerTile() short-circuits on tileCacheW hits, so
-  // any tile we set here skips the worker's direct AWS fallback.
-  if (data && Array.isArray(data.tiles)) {
-    for (const t of data.tiles as Array<{ key: string; data: Float32Array }>) {
-      tileCacheW.set(t.key, t.data)
-    }
-  }
-
   // Dispatch by message type
   if (data && data.type === 'refine-peaks') {
     // Second pass: peak-driven refinement using higher-zoom tiles

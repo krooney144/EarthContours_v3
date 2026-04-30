@@ -57,7 +57,6 @@ import {
   headingToCompass, clamp, metersToFeet,
 } from '../../core/utils'
 import { fetchPeaksNear }                from '../../data/peakLoader'
-import { prefetchSkylineTiles, prefetchRefineTiles } from '../../data/scanTilePrefetch'
 import type { Peak, SkylineData, SkylineBand, SkylineRequest, RefinedArc, PeakRefineItem, SilhouetteLayer, SilhouetteData, NearFieldProfile } from '../../core/types'
 import { DEPTH_BANDS, SILHOUETTE_FLOATS_PER_CANDIDATE, NEAR_PROFILE_SAMPLES, NEAR_PROFILE_AGL_LIMIT } from '../../core/types'
 import { NavigateHint } from '../../components/NavigateHint/NavigateHint'
@@ -2783,11 +2782,7 @@ const ScanScreen: React.FC = () => {
       maxRange:       MAX_DIST,
     }
 
-    // Warm tiles via the main-thread 4-tier cache (memory → IDB → local → AWS)
-    // and hand them to the worker so it doesn't re-download what we already have.
-    prefetchSkylineTiles(activeLat, activeLng, MAX_DIST).then(({ tiles, transferables }) => {
-      worker.postMessage({ ...request, tiles }, transferables)
-    })
+    worker.postMessage(request)
 
   }, [activeLat, activeLng])  // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -2974,9 +2969,7 @@ const ScanScreen: React.FC = () => {
     if (refineItems.length === 0) return
 
     log.info('Requesting peak refinement', { peaks: refineItems.length })
-    prefetchRefineTiles(vLat, vLng, refineItems).then(({ tiles, transferables }) => {
-      worker.postMessage({ type: 'refine-peaks', peaks: refineItems, tiles }, transferables)
-    })
+    worker.postMessage({ type: 'refine-peaks', peaks: refineItems })
   }, [skylineData, activePeaks, isSkylineComputing, projectedBands, height_m])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Canvas sizing (only on resize) ────────────────────────────────────────
@@ -3642,7 +3635,7 @@ const PeakLabel: React.FC<{
   units: 'imperial' | 'metric'
   canvasH: number
 }> = ({ pos, units, canvasH }) => {
-  const distFade  = Math.max(0.6, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
+  const distFade  = Math.max(0.25, 1 - Math.pow(pos.dist_km / (MAX_PEAK_DIST / 1000), 0.5))
   const isNearTop = pos.screenY < canvasH * 0.22
 
   // Format distance respecting unit preference

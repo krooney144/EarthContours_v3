@@ -2,9 +2,14 @@
  * EarthContours — App Constants
  *
  * Magic numbers collected here instead of scattered through the codebase.
+ * If you need to change a value (like the splash duration), change it once here
+ * and every place that uses SPLASH_DURATION_MS updates automatically.
  */
 
 // ─── Timing ───────────────────────────────────────────────────────────────────
+
+/** How long the splash screen shows before entering the app (ms) */
+export const SPLASH_DURATION_MS = 2400
 
 /**
  * Screen transition timing (ms).
