@@ -31,7 +31,7 @@ import { createLogger } from '../../core/logger'
 import {
   DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM,
   MAP_MIN_ZOOM, MAP_MAX_ZOOM, TILE_SIZE,
-  MAP_LABEL_TILE_URL, MAP_ROAD_TILE_URL, MAP_TILE_SUBDOMAINS,
+  MAP_LABEL_TILE_URL, MAP_ROAD_TILE_URL, MAP_TILE_SUBDOMAINS, CARTO_ENABLED,
 } from '../../core/constants'
 import {
   latLngToTile, tileToLatLng, latLngToPixel, pixelToLatLng,
@@ -864,7 +864,9 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     if (thisGeneration !== loadingRef.current) return
 
     // ── Pass 2: Road overlay (zoom 8+ only, screen-blended) ──────────────────
-    if (showRoads && tileZoom >= 8) {
+    // Skipped when VITE_CARTO_KEY is unset — otherwise Carto returns a
+    // watermarked tile. The DEM map renders fine without roads.
+    if (showRoads && tileZoom >= 8 && CARTO_ENABLED) {
       ctx.globalCompositeOperation = 'screen'
       ctx.globalAlpha = 1.0
       await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
@@ -883,17 +885,21 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     }
 
     // ── Pass 3: Label overlay (towns, cities) ───────────────────────────────
-    await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
-      loadLabelTile(tileZoom, wrappedX, tileY)
-        .then((img) => {
-          if (thisGeneration !== loadingRef.current) return
-          ctx.drawImage(img, pixelX, pixelY, displayTileSize + 1, displayTileSize + 1)
-        })
-        .catch(() => {
-          // Label tiles are optional — silent fail if CDN is unavailable
-        }),
-    ))
-    if (thisGeneration !== loadingRef.current) return
+    // Skipped when VITE_CARTO_KEY is unset — otherwise Carto returns a
+    // watermarked tile. The DEM map renders fine without labels.
+    if (CARTO_ENABLED) {
+      await Promise.all(tileJobs.map(({ wrappedX, tileY, pixelX, pixelY }) =>
+        loadLabelTile(tileZoom, wrappedX, tileY)
+          .then((img) => {
+            if (thisGeneration !== loadingRef.current) return
+            ctx.drawImage(img, pixelX, pixelY, displayTileSize + 1, displayTileSize + 1)
+          })
+          .catch(() => {
+            // Label tiles are optional — silent fail if CDN is unavailable
+          }),
+      ))
+      if (thisGeneration !== loadingRef.current) return
+    }
 
     // ── Loaded region border ───────────────────────────────────────────────
     if (activeRegion && meshData) {
