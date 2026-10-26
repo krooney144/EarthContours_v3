@@ -435,6 +435,35 @@
   letter-spacing: 0.1em;
 }
 
+/* Attribution — required by CARTO basemap terms and OSM license.
+   pointer-events: auto so the links are clickable despite the coord bar
+   itself being pointer-events: none. */
+.attribution {
+  font-family: var(--font-body);
+  font-size: 10px;
+  color: var(--ec-text-muted);
+  opacity: 0.75;
+  letter-spacing: 0.02em;
+  pointer-events: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin: 0 var(--space-2);
+}
+
+.attribution a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: currentColor;
+  text-underline-offset: 2px;
+}
+
+.attribution a:hover,
+.attribution a:focus-visible {
+  opacity: 1;
+  color: var(--ec-text);
+}
+
 /* ── GPS Permission Prompt ──────────────────────────────────────────────────── */
 /* Toast-style prompt that appears when user taps "My Location" without permission. */
 

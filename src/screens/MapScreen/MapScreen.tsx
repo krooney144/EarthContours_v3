@@ -48,7 +48,6 @@ const log = createLogger('SCREEN:MAP')
 
 // ─── Attribution ───────────────────────────────────────────────────────────────
 
-const DEM_ATTRIBUTION = '© Mapzen / AWS Terrain Tiles · © OpenStreetMap · © CARTO'
 
 // ─── Elevation → Ocean-Depth Color ────────────────────────────────────────────
 
@@ -1299,12 +1298,10 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
     // Draws a vertical gradient bar on the left showing the color → elevation mapping.
     drawElevationLegend(ctx, W, H)
 
-    // ── Attribution ──────────────────────────────────────────────────────────
-    ctx.font      = '10px Arial, sans-serif'
-    ctx.fillStyle = 'rgba(240, 248, 255, 0.4)'
-    ctx.textAlign = 'right'
-    ctx.shadowBlur = 0
-    ctx.fillText(DEM_ATTRIBUTION, W - 8, H - 8)
+    // Attribution is rendered as HTML in the coord bar below the canvas so the
+    // links are clickable (CARTO's basemap terms require visible attribution to
+    // both OpenStreetMap and CARTO). The old canvas-painted copy was hidden
+    // under the coord bar, so it did not satisfy the terms.
 
     setIsLoading(false)
     log.debug('DEM map draw complete')
@@ -2623,10 +2620,25 @@ const MapScreen: React.FC<MapScreenProps> = ({ exhibitMode = false }) => {
         )
       })()}
 
-      {/* Coordinate bar */}
+      {/* Coordinate bar — includes CARTO + OSM attribution as required by Carto's
+          basemap terms (visible + linked to each provider). */}
       <div className={styles.coordBar} aria-label="Map coordinates">
         <span className={styles.coordText}>
           {formatCoordinates(cursorLat, cursorLng, 'decimal')}
+        </span>
+        <span className={styles.attribution} aria-label="Map attribution">
+          ©{' '}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">
+            OpenStreetMap
+          </a>
+          {CARTO_ENABLED && (
+            <>
+              {' · © '}
+              <a href="https://carto.com/attributions" target="_blank" rel="noopener noreferrer">
+                CARTO
+              </a>
+            </>
+          )}
         </span>
         <span className={styles.zoomText}>Z{Math.round(zoom)}</span>
       </div>
