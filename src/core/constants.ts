@@ -91,15 +91,29 @@ export const DEFAULT_MAP_ZOOM = 9
 export const MAP_TILE_SUBDOMAINS = ['a', 'b', 'c', 'd'] as const
 
 /**
- * Carto dark_only_labels — transparent tiles, white place/road labels only.
- * Drawn on top of the DEM overlay to show towns, cities, roads.
- * Free, no API key. {r} = '@2x' retina suffix.
+ * Carto basemap tiles — require a free API key as of 2025.
+ * Keyless requests return a watermarked "API KEY REQUIRED" tile that still
+ * loads with HTTP 200, so there's no network error to catch — the only way
+ * to detect it is to refuse to request them without a key.
+ *
+ * Set `VITE_CARTO_KEY` in `.env.local` (dev) and in Vercel's env vars (prod).
+ * See `.env.example` and https://carto.com/basemaps/apikey/.
+ *
+ * CARTO_ENABLED gates the label + road passes in MapScreen. When false,
+ * the DEM map still renders — just unlabeled — which is a graceful
+ * degradation path if the key is missing, revoked, or Carto changes its
+ * terms again. {r} = '@2x' retina suffix.
  */
-export const MAP_LABEL_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png'
+const CARTO_KEY: string = import.meta.env.VITE_CARTO_KEY ?? ''
+export const CARTO_ENABLED: boolean = CARTO_KEY.length > 0
+const CARTO_KEY_QS = CARTO_ENABLED ? `?key=${CARTO_KEY}` : ''
+
+/** Carto dark_only_labels — transparent tiles, white place/road labels only. */
+export const MAP_LABEL_TILE_URL = `https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png${CARTO_KEY_QS}`
 
 /** Carto dark_nolabels — road lines without text, on an opaque dark background.
  *  Drawn with 'screen' blending to extract light road lines over DEM. */
-export const MAP_ROAD_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'
+export const MAP_ROAD_TILE_URL = `https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png${CARTO_KEY_QS}`
 
 export const MAP_ATTRIBUTION = '© Mapzen / AWS Terrain Tiles · © OpenStreetMap · © CARTO'
 
